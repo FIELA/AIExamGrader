@@ -1,6 +1,6 @@
 # AI Exam Grader (Pro)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -90,4 +90,6 @@ The executable folder will be generated in the `dist/` folder.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Non-Commercial Educational License - see the [LICENSE](LICENSE) file for details.
+
+**For commercial use, please contact JASim for licensing options.**
