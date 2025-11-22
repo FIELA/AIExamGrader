@@ -48,7 +48,16 @@ pip install -r requirements.txt
 ```bash
 cp config.json.example config.json
 ```
-然后编辑 `config.json` 添加您的 API Key。
+
+然后编辑 `config.json`，配置以下参数：
+
+- **api_key**: 您的 API 密钥
+- **base_url**: API 端点地址（可选）
+  - OpenAI 官方：留空或填写 `https://api.openai.com/v1`
+  - Gemini 官方：留空（程序会自动使用官方端点）
+  - 第三方 OpenAI 兼容服务：填写您的自定义端点
+- **provider**: 服务商类型（`openai` 或 `gemini`）
+- **model**: 模型名称（如 `gpt-4o`、`gemini-3.0-pro`）
 
 ### 4. 运行程序
 ```bash

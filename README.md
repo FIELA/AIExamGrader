@@ -48,7 +48,16 @@ Copy `config.json.example` to `config.json` and update with your API credentials
 ```bash
 cp config.json.example config.json
 ```
-Then edit `config.json` to add your API key.
+
+Then edit `config.json` to configure the following parameters:
+
+- **api_key**: Your API key
+- **base_url**: API endpoint URL (optional)
+  - OpenAI official: leave empty or use `https://api.openai.com/v1`
+  - Gemini official: leave empty (the app will use the official endpoint automatically)
+  - Third-party OpenAI-compatible services: provide your custom endpoint
+- **provider**: Service provider type (`openai` or `gemini`)
+- **model**: Model name (e.g., `gpt-4o`, `gemini-3.0-pro`)
 
 ### 4. Run Application
 ```bash
