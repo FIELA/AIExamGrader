@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Mac
+.DS_Store
+
+# Project Specific
+config.json
+reports/
+failed/
+*.log
+build/
+dist/
+*.spec

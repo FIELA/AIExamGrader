@@ -1,0 +1,1152 @@
+import os
+import threading
+import time
+import platform
+import re
+import shutil
+import datetime
+import concurrent.futures
+import json
+from typing import List, Dict, Any, Optional
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+
+# Import new modules
+from config_manager import ConfigManager
+from student_manager import StudentManager
+from grader_engine import AIGraderEngine
+from translations import TRANSLATIONS
+from review_window import ReviewWindow
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Mac AI 智能阅卷助手 (Pro)")
+        self.geometry("1100x800")
+        ctk.set_appearance_mode("System")
+        ctk.set_default_color_theme("dark-blue")
+
+        self.config_manager = ConfigManager()
+        self.student_manager = StudentManager()
+        
+        self.rubric_path = ""
+        self.exam_folder = ""
+        
+        self.processing = False
+        self.write_lock = threading.Lock()
+        self.completed_count = 0
+        self.total_files = 0
+        
+        # Control events
+        self.pause_event = threading.Event()
+        self.pause_event.set() # Initially set to True (running)
+        self.stop_event = threading.Event()
+        
+        # Time tracking
+        self.start_time = 0
+        self.session_completed_count = 0
+
+        self.current_lang = "CN" # Default language
+        
+        self.setup_ui()
+        self.load_initial_config()
+        self.update_ui_text() # Apply initial language
+        
+        if platform.system() == "Darwin":
+            self.apply_mac_paste_fix(self.entry_key)
+            self.apply_mac_paste_fix(self.entry_base)
+            try: self.apply_mac_paste_fix_to_widget(self.combo_model._entry)
+            except: pass
+
+    def apply_mac_paste_fix(self, ctk_widget):
+        try:
+            if hasattr(ctk_widget, "_entry"):
+                self.apply_mac_paste_fix_to_widget(ctk_widget._entry)
+        except Exception: pass
+
+    def apply_mac_paste_fix_to_widget(self, tk_widget):
+        tk_widget.bind("<Command-v>", self.paste_event_handler)
+
+    def paste_event_handler(self, event):
+        try:
+            clipboard = self.clipboard_get()
+            event.widget.insert("insert", clipboard)
+            return "break"
+        except Exception: return None
+
+    def setup_ui(self):
+        # Configure grid layout (1x2)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # --- Sidebar (Left) ---
+        self.sidebar_frame = ctk.CTkFrame(self, width=250, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="AI Exam Grader", font=ctk.CTkFont(size=24, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+
+        # Language Selector
+        self.lbl_lang = ctk.CTkLabel(self.sidebar_frame, text="Language:", anchor="w")
+        self.lbl_lang.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language)
+        self.combo_lang.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        # API Config
+        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text="API Key:", anchor="w")
+        self.lbl_key.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...")
+        self.entry_key.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text="Base URL (Optional):", anchor="w")
+        self.lbl_base.grid(row=5, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...")
+        self.entry_base.grid(row=6, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        # Provider & Model
+        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text="Service Provider:", anchor="w")
+        self.lbl_provider.grid(row=7, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.provider_var = ctk.StringVar(value="OpenAI")
+        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change)
+        self.combo_provider.grid(row=8, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text="Model Name:", anchor="w")
+        self.lbl_model.grid(row=9, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"])
+        self.combo_model.set("gemini-2.5-pro-maxthinking")
+        self.combo_model.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
+        
+        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text="Check Models", command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"))
+        self.btn_check_model.grid(row=11, column=0, padx=20, pady=10, sticky="ew")
+
+        # --- Main Content (Right) ---
+        self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.main_frame.grid_rowconfigure(3, weight=1) # Log area expands
+        self.main_frame.grid_columnconfigure(0, weight=1) # Allow content to expand horizontally
+
+        # 1. File Selection Card
+        self.files_card = ctk.CTkFrame(self.main_frame)
+        self.files_card.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        self.files_card.grid_columnconfigure(1, weight=1)
+
+        self.lbl_resources = ctk.CTkLabel(self.files_card, text="Resources", font=ctk.CTkFont(size=16, weight="bold"))
+        self.lbl_resources.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+
+        # Rubric
+        self.btn_rubric = ctk.CTkButton(self.files_card, text="📄 Upload Rubric", command=self.load_rubric, width=140)
+        self.btn_rubric.grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        self.lbl_rubric_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"))
+        self.lbl_rubric_status.grid(row=1, column=1, padx=10, sticky="w")
+
+        # Folder
+        self.btn_folder = ctk.CTkButton(self.files_card, text="📂 Select Folder", command=self.select_folder, width=140)
+        self.btn_folder.grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        self.lbl_folder_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"))
+        self.lbl_folder_status.grid(row=2, column=1, padx=10, sticky="w")
+
+        # Student List
+        self.btn_list = ctk.CTkButton(self.files_card, text="👥 Student List", command=self.load_student_list, width=140)
+        self.btn_list.grid(row=3, column=0, padx=15, pady=(5, 15), sticky="w")
+        self.lbl_list_status = ctk.CTkLabel(self.files_card, text="Not Uploaded", text_color=("gray40", "gray60"))
+        self.lbl_list_status.grid(row=3, column=1, padx=10, pady=(5, 15), sticky="w")
+
+        # 2. Dashboard & Controls
+        self.dashboard_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 15))
+        self.dashboard_frame.grid_columnconfigure(0, weight=1)
+        self.dashboard_frame.grid_columnconfigure(1, weight=1)
+
+        # Controls
+        self.controls_card = ctk.CTkFrame(self.dashboard_frame)
+        self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        self.btn_start = ctk.CTkButton(self.controls_card, text="▶️ Start Grading", fg_color="#106A38", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.start_grading_thread)
+        self.btn_start.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        
+        self.btn_pause = ctk.CTkButton(self.controls_card, text="⏸️ Pause", fg_color="#D97706", text_color="white", height=50, font=("Arial", 16, "bold"), state="disabled", command=self.toggle_pause)
+        self.btn_pause.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        
+        self.btn_stop = ctk.CTkButton(self.controls_card, text="⏹️ Stop", fg_color="#DC2626", text_color="white", height=50, font=("Arial", 16, "bold"), state="disabled", command=self.stop_grading)
+        self.btn_stop.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+
+        self.btn_review = ctk.CTkButton(self.controls_card, text="🔍 Review", fg_color="#4B5563", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.open_review_window)
+        self.btn_review.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+
+        # Stats
+        self.stats_card = ctk.CTkFrame(self.dashboard_frame)
+        self.stats_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        
+        self.lbl_progress = ctk.CTkLabel(self.stats_card, text="Progress: 0 / 0", font=("Arial", 16, "bold"))
+        self.lbl_progress.pack(pady=(15, 5))
+        
+        self.lbl_etr = ctk.CTkLabel(self.stats_card, text="ETR: --:--", font=("Arial", 14), text_color=("gray40", "gray60"))
+        self.lbl_etr.pack(pady=(0, 15))
+
+        # 3. Progress Bar
+        self.progress_bar = ctk.CTkProgressBar(self.main_frame, height=15)
+        self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 15))
+        self.progress_bar.set(0)
+
+        # 4. Logs
+        self.log_box = ctk.CTkTextbox(self.main_frame, font=("Consolas", 12))
+        self.log_box.grid(row=3, column=0, sticky="nsew")
+
+    def load_initial_config(self):
+        api_key = self.config_manager.get("api_key", "")
+        base_url = self.config_manager.get("base_url", "")
+        lang = self.config_manager.get("language", "CN")
+        
+        if api_key:
+            self.entry_key.delete(0, "end")
+            self.entry_key.insert(0, api_key)
+        if base_url:
+            self.entry_base.delete(0, "end")
+            self.entry_base.insert(0, base_url)
+            
+        self.current_lang = lang
+        self.combo_lang.set("中文" if lang == "CN" else "English")
+        
+        self.log(self.t("msg_config_loaded"))
+
+    def save_current_config(self):
+        self.config_manager.set("api_key", self.entry_key.get().strip())
+        self.config_manager.set("base_url", self.entry_base.get().strip())
+        self.config_manager.set("language", self.current_lang)
+
+    def t(self, key, **kwargs):
+        """Translate helper"""
+        text = TRANSLATIONS.get(self.current_lang, TRANSLATIONS["CN"]).get(key, key)
+        if kwargs:
+            return text.format(**kwargs)
+        return text
+
+    def change_language(self, choice):
+        self.current_lang = "CN" if choice == "中文" else "EN"
+        self.update_ui_text()
+        self.save_current_config()
+
+    def update_ui_text(self):
+        self.title(self.t("app_title"))
+        self.logo_label.configure(text=self.t("logo"))
+        
+        self.lbl_lang.configure(text=self.t("lbl_language"))
+        self.lbl_key.configure(text=self.t("lbl_key"))
+        self.lbl_base.configure(text=self.t("lbl_base"))
+        self.lbl_provider.configure(text=self.t("lbl_provider"))
+        self.lbl_model.configure(text=self.t("lbl_model"))
+        self.btn_check_model.configure(text=self.t("btn_check_model"))
+        
+        self.lbl_resources.configure(text=self.t("lbl_resources"))
+        self.btn_rubric.configure(text=self.t("btn_rubric"))
+        self.btn_folder.configure(text=self.t("btn_folder"))
+        self.btn_list.configure(text=self.t("btn_list"))
+        
+        if "Not Selected" in self.lbl_rubric_status.cget("text") or "未选择" in self.lbl_rubric_status.cget("text"):
+            self.lbl_rubric_status.configure(text=self.t("status_not_selected"))
+        if "Not Selected" in self.lbl_folder_status.cget("text") or "未选择" in self.lbl_folder_status.cget("text"):
+            self.lbl_folder_status.configure(text=self.t("status_not_selected"))
+        if "Not Uploaded" in self.lbl_list_status.cget("text") or "未上传" in self.lbl_list_status.cget("text"):
+             self.lbl_list_status.configure(text=self.t("status_not_uploaded"))
+             
+        self.btn_start.configure(text=self.t("btn_start"))
+        if self.pause_event.is_set():
+            self.btn_pause.configure(text=self.t("btn_pause"))
+        else:
+            self.btn_pause.configure(text=self.t("btn_resume"))
+        self.btn_stop.configure(text=self.t("btn_stop"))
+        
+        self.update_progress_ui() # Update progress text
+
+    def on_provider_change(self, choice):
+        current_model = self.combo_model.get()
+        if choice == "OpenAI":
+            if "gemini" in current_model.lower() and "maxthinking" not in current_model.lower():
+                self.combo_model.set("gpt-4o")
+        elif choice == "Gemini":
+            if "gpt" in current_model.lower():
+                self.combo_model.set("gemini-1.5-pro")
+
+    def check_models(self):
+        api_key = self.entry_key.get()
+        if not api_key:
+            messagebox.showerror("Error", self.t("msg_enter_key"))
+            return
+        self.btn_check_model.configure(state="disabled", text=self.t("checking"))
+        def run_check():
+            try:
+                engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get())
+                models = engine.get_available_models()
+                self.after(0, lambda: self.update_model_list(models))
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda: messagebox.showerror("Check Failed", err))
+            finally:
+                self.after(0, lambda: self.btn_check_model.configure(state="normal", text=self.t("btn_check_model")))
+        threading.Thread(target=run_check, daemon=True).start()
+
+    def update_model_list(self, models):
+        if not models: return
+        self.combo_model.configure(values=models)
+        self.combo_model.set(models[0])
+        messagebox.showinfo("Success", self.t("check_success", count=len(models)))
+
+    def log(self, message):
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")
+        self.log_box.insert("end", f"[{current_time}] {message}\n")
+        self.log_box.see("end")
+
+    def check_ready_and_verify(self):
+        """
+        Only trigger verification if all 3 resources are selected.
+        """
+        if self.rubric_path and self.exam_folder and self.student_manager.students:
+            self.check_completion_status()
+
+    def load_rubric(self):
+        default_dir = os.path.expanduser("~/Downloads")
+        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[("Text Files", "*.txt"), ("Markdown", "*.md")])
+        if path:
+            self.rubric_path = path
+            self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
+            self.check_ready_and_verify()
+
+    def select_folder(self):
+        default_dir = os.path.expanduser("~/Downloads/photo")
+        if not os.path.exists(default_dir):
+            default_dir = os.path.expanduser("~/Downloads")
+        path = filedialog.askdirectory(initialdir=default_dir)
+        if path:
+            self.exam_folder = path
+            self.lbl_folder_status.configure(text=os.path.basename(path), text_color="#106A38")
+            self.check_ready_and_verify()
+
+    def load_student_list(self):
+        default_dir = os.path.expanduser("~/Downloads")
+        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[("Excel/CSV", "*.xlsx *.csv")])
+        if path:
+            try:
+                count = self.student_manager.load_from_file(path)
+                self.lbl_list_status.configure(text=self.t("status_students", count=count), text_color="#106A38")
+                self.log(self.t("msg_list_loaded", count=count))
+                self.check_ready_and_verify()
+            except Exception as e:
+                self.log(self.t("msg_list_failed", error=e))
+                self.lbl_list_status.configure(text=self.t("status_failed"), text_color="#DC2626")
+
+    def check_completion_status(self):
+        """
+        Strict 1-to-1 verification:
+        For every image file in the folder:
+        1. Identify Student (Room/Seat).
+        2. Check if 'reports/{Room}-{Seat}.md' exists.
+        3. Check if Student exists in '成绩汇总表.csv'.
+        """
+        if not self.exam_folder: return
+        
+        # 1. Get Images
+        valid_extensions = ('.png', '.jpg', '.jpeg')
+        try:
+            images = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
+            total_images = len(images)
+        except Exception: return
+
+        if total_images == 0: return
+
+        self.log(f"🔍 Starting detailed verification for {total_images} files...")
+
+        # 2. Load CSV Data for quick lookup
+        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        csv_data = set() # Stores (Room, Seat) tuples
+        if os.path.exists(csv_path):
+            try:
+                import csv
+                with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        r = row.get('考场', '').strip()
+                        s = row.get('座号', '').strip()
+                        if r and s: csv_data.add((r, s))
+            except Exception as e:
+                self.log(f"⚠️ Failed to read CSV: {e}")
+
+        # 3. Verify 1-to-1
+        missing_reports = []
+        missing_csv = []
+        missing_jsons = []
+        failed_files = []
+        
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        failed_dir = os.path.join(self.exam_folder, "failed")
+        
+        # Use a thread to avoid blocking UI during verification of many files
+        def verify_task():
+            checked_count = 0
+            for filename in images:
+                checked_count += 1
+                if checked_count % 50 == 0:
+                    self.after(0, lambda c=checked_count: self.log(f"🔍 Verified {c}/{total_images}..."))
+
+                # Get Student Info
+                student_info, _ = self.student_manager.get_student_by_filename(filename)
+                room = str(student_info.get('room', '未知'))
+                seat = str(student_info.get('seat', '未知'))
+                
+                # Check Report (.md)
+                md_name = f"{room}-{seat}.md"
+                md_path = os.path.join(reports_dir, md_name)
+                if not os.path.exists(md_path):
+                    missing_reports.append(filename)
+                
+                # Check JSON (.json)
+                json_name = f"{room}-{seat}.json"
+                json_path = os.path.join(reports_dir, json_name)
+                if not os.path.exists(json_path):
+                    missing_jsons.append(filename)
+                
+                # Check CSV
+                if (room, seat) not in csv_data:
+                    missing_csv.append(filename)
+
+            # Check Failed Folder
+            if os.path.exists(failed_dir):
+                try:
+                    failed_files.extend([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
+                except: pass
+
+            # Result
+            self.after(0, lambda: self.handle_verification_result(total_images, missing_reports, missing_csv, missing_jsons, failed_files))
+
+        threading.Thread(target=verify_task, daemon=True).start()
+
+    def handle_verification_result(self, total, missing_reports, missing_csv, missing_jsons, failed_files):
+        if not missing_reports and not missing_csv and not missing_jsons and not failed_files:
+            self.log(f"✅ Verification Passed! All {total} files have Reports, JSONs, and CSV entries.")
+            
+            if messagebox.askyesno("Grading Complete", "Grading finished successfully!\nDo you want to enter Manual Review mode now?\n阅卷完成！是否现在进入人工复审模式？"):
+                self.after(100, self.open_review_window)
+        else:
+            msg = f"⚠️ Verification Incomplete / 发现缺失 ({total} files):\n"
+            
+            missing_set = set()
+            
+            if missing_reports:
+                msg += f"- Missing Reports: {len(missing_reports)}\n"
+                missing_set.update(missing_reports)
+            if missing_jsons:
+                msg += f"- Missing JSONs: {len(missing_jsons)}\n"
+                missing_set.update(missing_jsons)
+            if missing_csv:
+                msg += f"- Missing CSV Entries: {len(missing_csv)}\n"
+                missing_set.update(missing_csv)
+            if failed_files:
+                msg += f"- Failed Files: {len(failed_files)}\n"
+                missing_set.update(failed_files)
+                
+            self.log(msg)
+            
+            # Prompt to fix
+            if messagebox.askyesno("Incomplete Grading", f"{msg}\nDo you want to complete grading for these {len(missing_set)} items?\n(This will re-grade them and overwrite existing data)\n是否补足缺失的条目？"):
+                self.start_targeted_grading(list(missing_set))
+
+    def ensure_jsons_exist(self):
+        """
+        If .md exists but .json missing (Legacy), try to generate a minimal .json 
+        so ReviewWindow can open.
+        """
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir): return
+        
+        # We iterate known students/images to reconstruct
+        # Ideally we parse the CSV to get the scores back
+        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        if not os.path.exists(csv_path): return
+        
+        import csv
+        csv_rows = []
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            csv_rows = list(reader)
+            
+        for row in csv_rows:
+            room = row.get('考场')
+            seat = row.get('座号')
+            if not room or not seat: continue
+            
+            json_name = f"{room}-{seat}.json"
+            json_path = os.path.join(reports_dir, json_name)
+            
+            if not os.path.exists(json_path):
+                # Reconstruct minimal data
+                # Find original filename via StudentManager is hard efficiently without reverse map
+                # But ReviewWindow needs it.
+                # Let's try to find it by iterating students? Slow.
+                # Or just leave original_filename empty and let ReviewWindow handle it (it won't show image).
+                # Better: StudentManager.get_filename_by_student(room, seat) - need to implement?
+                # For now, let's just save what we have.
+                
+                data = {
+                    'total_score': row.get('总分', 0),
+                    'ocr_name': row.get('OCR姓名', ''),
+                    'ocr_class': row.get('OCR班级', ''),
+                    'ocr_room': row.get('OCR考场', ''),
+                    'ocr_seat': row.get('OCR座号', ''),
+                    'ocr_id_written': row.get('OCR手写考号', ''),
+                    'ocr_id_filled': row.get('OCR填涂考号', ''),
+                    'db_student_info': {
+                        'name': row.get('姓名', ''),
+                        'id': row.get('考号', ''),
+                        'class': row.get('班级', ''),
+                        'room': room,
+                        'seat': seat
+                    },
+                    'details': [] # We can't easily reconstruct details from CSV flat columns without parsing logic
+                }
+                
+                # Try to populate details from dynamic CSV columns?
+                # It's complex. For now, create a placeholder so it opens.
+                # If user edits, it might overwrite/mess up.
+                # Maybe better to NOT create JSON and let ReviewWindow filter?
+                # But ReviewWindow iterates JSONs.
+                
+                # Let's write it.
+                try:
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                except: pass
+
+    def start_grading_thread(self):
+        if not self.rubric_path or not self.exam_folder:
+            messagebox.showerror("Error", self.t("msg_select_files"))
+            return
+        if not self.entry_key.get():
+            messagebox.showerror("Error", self.t("msg_enter_key"))
+            return
+        self.save_current_config()
+        
+        self.processing = True
+        self.stop_event.clear()
+        self.pause_event.set()
+        
+        self.btn_start.configure(state="disabled")
+        self.btn_pause.configure(state="normal", text=self.t("btn_pause"))
+        self.btn_stop.configure(state="normal")
+        
+        # Reset session stats
+        self.start_time = time.time()
+        self.session_completed_count = 0
+        
+        threading.Thread(target=self.process_images, daemon=True).start()
+
+    def toggle_pause(self):
+        if self.pause_event.is_set():
+            self.pause_event.clear()
+            self.btn_pause.configure(text=self.t("btn_resume"), fg_color="#106A38")
+            self.log(self.t("msg_paused"))
+        else:
+            self.pause_event.set()
+            self.btn_pause.configure(text=self.t("btn_pause"), fg_color="#D97706")
+            self.log(self.t("msg_resumed"))
+
+    def stop_grading(self):
+        if messagebox.askyesno("Confirm", self.t("msg_confirm_stop")):
+            self.stop_event.set()
+            self.pause_event.set() # Ensure threads can wake up to exit
+            self.log(self.t("msg_stopping"))
+
+    def write_summary_csv(self, data_dict):
+        import csv
+        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        
+        # Dynamic headers based on data_dict keys
+        priority = ['考场', '座号', '班级', '姓名', '考号', '客观题', '总分', 
+                    'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
+        
+        headers = list(data_dict.keys())
+        remaining = [h for h in headers if h not in priority and h != '原始文件']
+        
+        def natural_sort_key(s):
+            return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+        
+        remaining.sort(key=natural_sort_key)
+        sorted_headers = priority + remaining + ['原始文件']
+
+        with self.write_lock:
+            file_exists = os.path.isfile(csv_path)
+            existing_headers = []
+            if file_exists:
+                try:
+                    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                        reader = csv.reader(f)
+                        existing_headers = next(reader, [])
+                except: pass
+            
+            final_headers = existing_headers if existing_headers else sorted_headers
+            
+            try:
+                with open(csv_path, mode='a', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
+                    if not file_exists:
+                        writer.writeheader()
+                    writer.writerow(data_dict)
+            except Exception as e:
+                self.after(0, lambda: self.log(f"⚠️ Write CSV failed: {str(e)}"))
+
+    def generate_report_content(self, data, db_student_info):
+        student_name = db_student_info.get('name', '未知')
+        student_id = db_student_info.get('id', '未知')
+        class_no = db_student_info.get('class', '未知')
+        exam_room = db_student_info.get('room', '未知')
+        seat_no = db_student_info.get('seat', '未知')
+        
+        ocr_name = data.get('ocr_name', '')
+        ocr_class = data.get('ocr_class', '')
+        ocr_room = data.get('ocr_room', '')
+        ocr_seat = data.get('ocr_seat', '')
+        ocr_id_written = data.get('ocr_id_written', '')
+        ocr_id_filled = data.get('ocr_id_filled', '')
+        
+        if not ocr_id_written and 'ocr_id' in data:
+            ocr_id_written = data['ocr_id']
+        
+        # --- Consistency Check (Any 2 matches) ---
+        matches = 0
+        details_msg = []
+        
+        def check_match(field_name, ocr_val, db_val):
+            if ocr_val and db_val != '未知':
+                s_ocr = str(ocr_val).strip()
+                s_db = str(db_val).strip()
+                if s_ocr.isdigit() and s_db.isdigit():
+                    if int(s_ocr) == int(s_db): return True
+                elif s_ocr == s_db: return True
+            return False
+
+        if check_match("姓名", ocr_name, student_name): matches += 1
+        else: details_msg.append(f"姓名({ocr_name})")
+        
+        if check_match("班级", ocr_class, class_no): matches += 1
+        else: details_msg.append(f"班级({ocr_class})")
+        
+        if check_match("考场", ocr_room, exam_room): matches += 1
+        else: details_msg.append(f"考场({ocr_room})")
+        
+        if check_match("座号", ocr_seat, seat_no): matches += 1
+        else: details_msg.append(f"座号({ocr_seat})")
+        
+        if check_match("手写考号", ocr_id_written, student_id): matches += 1
+        else: details_msg.append(f"手写({ocr_id_written})")
+        
+        if check_match("填涂考号", ocr_id_filled, student_id): matches += 1
+        else: details_msg.append(f"填涂({ocr_id_filled})")
+
+        consistency_note = "一致"
+        if matches >= 2:
+            consistency_note = "一致"
+        else:
+            consistency_note = "不符: " + "; ".join(details_msg)
+        
+        total_score = data.get('total_score', 0)
+        
+        details = data.get('details', [])
+        objective_q = [] 
+        subjective_q = {} 
+        obj_score_sum = 0
+        
+        sub_scores_dict = {}
+
+        for item in details:
+            q_type = item.get('type', '')
+            q_id = str(item.get('question_id', ''))
+            score = item.get('score', 0)
+            
+            if "客观" in q_type or "选择" in q_type:
+                objective_q.append(item)
+                obj_score_sum += score
+            else:
+                main_id = re.match(r"(\d+)", q_id)
+                main_id = main_id.group(1) if main_id else q_id
+                if main_id not in subjective_q: subjective_q[main_id] = []
+                subjective_q[main_id].append(item)
+                sub_scores_dict[q_id] = score
+
+        for main_id, items in subjective_q.items():
+            main_total = sum([x.get('score', 0) for x in items])
+            sub_scores_dict[f"{main_id}_总分"] = main_total
+
+        md = ""
+        md += f"# 📝 阅卷报告\n\n"
+        md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
+        md += f"- **考场座位**: {exam_room}考场 {seat_no}号\n"
+        md += f"- **信息校验**: {consistency_note} (匹配项数: {matches})\n"
+        md += f"- **OCR识别**:\n"
+        md += f"  - 姓名: {ocr_name}\n"
+        md += f"  - 班级: {ocr_class}\n"
+        md += f"  - 考场: {ocr_room} | 座号: {ocr_seat}\n"
+        md += f"  - 考号: 手写[{ocr_id_written}] | 填涂[{ocr_id_filled}]\n\n"
+        md += f"## 🏆 总分: {total_score}\n\n"
+        
+        # --- 1. Objective Questions ---
+        obj_correct_count = len([x for x in objective_q if x.get('score', 0) > 0])
+        obj_total_count = len(objective_q)
+        
+        md += "### 1. 客观题\n"
+        md += f"**得分**: {obj_score_sum} (正确: {obj_correct_count}/{obj_total_count})\n\n"
+        md += "| 题号 | 考生答案 | 正确答案 | 结果 |\n|---|---|---|---|\n"
+        for item in objective_q:
+            score = item.get('score', 0)
+            result_icon = "✅" if score > 0 else "❌"
+            md += f"| {item.get('question_id')} | {item.get('student_answer')} | {item.get('standard_answer')} | {result_icon} |\n"
+        
+        # --- 2. Subjective Questions ---
+        md += "\n### 2. 主观题\n"
+        sorted_keys = sorted(subjective_q.keys(), key=lambda x: int(x) if x.isdigit() else 999)
+        
+        for main_id in sorted_keys:
+            sub_items = subjective_q[main_id]
+            total_main = sum([x.get('score', 0) for x in sub_items])
+            md += f"\n#### 第 {main_id} 题 (总: {total_main})\n"
+            for sub in sub_items:
+                q_id = sub.get('question_id')
+                score = sub.get('score', 0)
+                max_score = sub.get('max_score')
+                student_text = sub.get('student_text', '')
+                
+                scoring_points = sub.get('scoring_points', '')
+                error_analysis = sub.get('error_analysis', '')
+                # Fallback to old fields if new ones are missing
+                if not scoring_points and not error_analysis:
+                    scoring_points = sub.get('analysis', '') or sub.get('reasoning', '')
+                
+                md += f"- **{q_id}**: {score}/{max_score}\n"
+                md += f"  - **考生答案**: {student_text}\n"
+                if scoring_points:
+                    md += f"  - **得分点**: {scoring_points}\n"
+                if error_analysis:
+                    md += f"  - **失分原因**: {error_analysis}\n"
+
+        return md, sub_scores_dict, consistency_note, matches
+
+    def save_markdown(self, data, original_filename, db_student_info):
+        exam_room = db_student_info.get('room', '未知')
+        seat_no = db_student_info.get('seat', '未知')
+        filename_prefix = f"{exam_room}-{seat_no}"
+        
+        # Generate Content
+        md_content, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_student_info)
+        
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir):
+            os.makedirs(reports_dir)
+            
+        # Save Markdown
+        save_path = os.path.join(reports_dir, f"{filename_prefix}.md")
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+            
+        # Save JSON (New for Review System)
+        json_path = os.path.join(reports_dir, f"{filename_prefix}.json")
+        # Add metadata to JSON for easier loading
+        data_to_save = data.copy()
+        data_to_save['original_filename'] = original_filename
+        data_to_save['db_student_info'] = db_student_info
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+            
+        summary_data = {
+            '考场': exam_room, '座号': seat_no, '班级': db_student_info.get('class', '未知'), 
+            '姓名': db_student_info.get('name', '未知'), '考号': db_student_info.get('id', '未知'),
+            '总分': data.get('total_score', 0),
+            '客观题': obj_score_sum,
+            'OCR姓名': data.get('ocr_name', ''), 'OCR班级': data.get('ocr_class', ''),
+            'OCR考场': data.get('ocr_room', ''), 'OCR座号': data.get('ocr_seat', ''),
+            'OCR手写考号': data.get('ocr_id_written', ''), 'OCR填涂考号': data.get('ocr_id_filled', ''),
+            '信息校验': consistency_note
+        }
+        summary_data.update(sub_scores_dict)
+        
+        self.update_csv_summary(summary_data)
+
+    def regrade_single_file(self, filename):
+        """
+        Re-grades a single image file.
+        1. Calls GraderEngine to process the image.
+        2. Saves the new Report (MD & JSON) and updates CSV.
+        3. Returns the new data.
+        """
+        self.log(f"🔄 Re-grading {filename}...")
+        
+        # Ensure grader engine exists
+        if not hasattr(self, 'grader_engine') or self.grader_engine is None:
+            try:
+                self.grader_engine = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            except Exception as e:
+                self.log(f"❌ Failed to initialize Grader Engine: {e}")
+                return False, str(e)
+
+        try:
+            with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
+            
+            # 1. Process Image
+            result = self.grader_engine.grade_exam(rubric_text, image_path)
+            
+            if 'error' in result:
+                self.log(f"❌ Re-grading error: {result['error']}")
+                return False, result['error']
+                
+            # 2. Resolve Student Info
+            filename = os.path.basename(image_path)
+            student_info, _ = self.student_manager.get_student_by_filename(filename)
+            
+            # 3. Save Report (Overwrites existing)
+            self.save_markdown(result, filename, student_info)
+            
+            self.log(f"✅ Re-grading complete for {filename}")
+            
+            # Return success
+            return True, "Success"
+            
+        except Exception as e:
+            return False, str(e)
+
+    def update_progress_ui(self):
+        # Update Progress Label
+        self.lbl_progress.configure(text=self.t("lbl_progress", completed=self.completed_count, total=self.total_files))
+        self.progress_bar.set(self.completed_count / self.total_files if self.total_files > 0 else 0)
+        
+        # Calculate ETR
+        if self.session_completed_count > 0:
+            elapsed = time.time() - self.start_time
+            avg_time = elapsed / self.session_completed_count
+            remaining_items = self.total_files - self.completed_count
+            
+            if remaining_items > 0:
+                etr_seconds = int(avg_time * remaining_items)
+                etr_str = str(datetime.timedelta(seconds=etr_seconds))
+                self.lbl_etr.configure(text=self.t("lbl_etr", time=etr_str))
+            else:
+                self.lbl_etr.configure(text=self.t("lbl_etr", time=self.t("etr_zero")))
+
+    def handle_verification_result(self, total, missing_reports, missing_csv, missing_jsons, failed_files):
+        if not missing_reports and not missing_csv and not missing_jsons and not failed_files:
+            self.log(self.t("msg_verification_pass"))
+            
+            if messagebox.askyesno(self.t("msg_grading_complete"), self.t("msg_enter_review")):
+                self.after(100, self.open_review_window)
+        else:
+            msg = self.t("msg_verification_fail", total=total) + "\n"
+            
+            missing_set = set()
+            
+            if missing_reports:
+                msg += self.t("msg_missing_reports", count=len(missing_reports)) + "\n"
+                missing_set.update(missing_reports)
+            if missing_jsons:
+                msg += self.t("msg_missing_jsons", count=len(missing_jsons)) + "\n"
+                missing_set.update(missing_jsons)
+            if missing_csv:
+                msg += self.t("msg_missing_csv", count=len(missing_csv)) + "\n"
+                missing_set.update(missing_csv)
+            if failed_files:
+                msg += self.t("msg_failed_files", count=len(failed_files)) + "\n"
+                missing_set.update(failed_files)
+                
+            self.log(msg)
+            
+            # Prompt to fix
+            if messagebox.askyesno(self.t("msg_incomplete_title"), self.t("msg_incomplete_body", msg=msg)):
+                self.start_targeted_grading(list(missing_set))
+
+    def ensure_jsons_exist(self):
+        """
+        If .md exists but .json missing (Legacy), try to generate a minimal .json 
+        so ReviewWindow can open.
+        """
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir): return
+        
+        # We iterate known students/images to reconstruct
+        # Ideally we parse the CSV to get the scores back
+        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        if not os.path.exists(csv_path): return
+        
+        import csv
+        csv_rows = []
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            csv_rows = list(reader)
+            
+        for row in csv_rows:
+            room = row.get('考场')
+            seat = row.get('座号')
+            if not room or not seat: continue
+            
+            json_name = f"{room}-{seat}.json"
+            json_path = os.path.join(reports_dir, json_name)
+            
+            if not os.path.exists(json_path):
+                data = {
+                    'total_score': row.get('总分', 0),
+                    'ocr_name': row.get('OCR姓名', ''),
+                    'ocr_class': row.get('OCR班级', ''),
+                    'ocr_room': row.get('OCR考场', ''),
+                    'ocr_seat': row.get('OCR座号', ''),
+                    'ocr_id_written': row.get('OCR手写考号', ''),
+                    'ocr_id_filled': row.get('OCR填涂考号', ''),
+                    'db_student_info': {
+                        'name': row.get('姓名', ''),
+                        'id': row.get('考号', ''),
+                        'class': row.get('班级', ''),
+                        'room': room,
+                        'seat': seat
+                    },
+                    'details': [] 
+                }
+                try:
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                except: pass
+
+    def start_targeted_grading(self, target_files):
+        if not target_files: return
+        
+        self.log(self.t("msg_targeted_start", count=len(target_files)))
+        
+        self.processing = True
+        self.stop_event.clear()
+        self.pause_event.set()
+        
+        self.btn_start.configure(state="disabled")
+        self.btn_pause.configure(state="normal", text=self.t("btn_pause"))
+        self.btn_stop.configure(state="normal")
+        
+        # Reset session stats for this batch
+        self.start_time = time.time()
+        self.session_completed_count = 0
+        
+        threading.Thread(target=self.process_images, args=(target_files,), daemon=True).start()
+
+    def process_images(self, target_files=None):
+        try:
+            with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
+            grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            valid_extensions = ('.png', '.jpg', '.jpeg')
+            
+            files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
+            self.total_files = len(files)
+            
+            pending_files = []
+            
+            if target_files:
+                # Targeted Mode: Only process specific files
+                failed_dir = os.path.join(self.exam_folder, "failed")
+                
+                for fname in target_files:
+                    # If in failed dir, move back to main first? 
+                    # Or just process from there? 
+                    # Better to move back to main so structure is clean.
+                    src_failed = os.path.join(failed_dir, fname)
+                    dest_main = os.path.join(self.exam_folder, fname)
+                    
+                    if os.path.exists(src_failed):
+                        try:
+                            shutil.move(src_failed, dest_main)
+                            self.log(self.t("msg_restored", filename=fname))
+                        except: pass
+                    
+                    if os.path.exists(dest_main):
+                        pending_files.append(fname)
+                
+                self.log(self.t("msg_targeted_ready", count=len(pending_files)))
+                
+            else:
+                # Normal Mode: Resume logic
+                for f in files:
+                    # Check if markdown exists in reports folder
+                    student_info, _ = self.student_manager.get_student_by_filename(f)
+                    exam_room = student_info.get('room', '未知')
+                    seat_no = student_info.get('seat', '未知')
+                    md_name = f"{exam_room}-{seat_no}.md"
+                    md_path = os.path.join(self.exam_folder, "reports", md_name)
+                    
+                    if os.path.exists(md_path):
+                        # Already done
+                        pass
+                    else:
+                        pending_files.append(f)
+            
+            self.completed_count = self.total_files - len(pending_files)
+            self.after(0, lambda: self.update_progress_ui())
+            
+            self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=len(pending_files))))
+            
+            if pending_files:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = []
+                    for filename in pending_files:
+                        if self.stop_event.is_set(): break
+                        f = executor.submit(self.process_single_file, grader, rubric_text, filename, self.exam_folder, False)
+                        futures.append(f)
+                        time.sleep(0.1) 
+                    concurrent.futures.wait(futures)
+            
+            # Retry failed (Only in normal mode, or if requested?)
+            # In targeted mode, we just tried them. If they fail again, they go to failed.
+            if not target_files and not self.stop_event.is_set():
+                failed_dir = os.path.join(self.exam_folder, "failed")
+                if os.path.exists(failed_dir):
+                    failed_files = [f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)]
+                    if failed_files:
+                        self.after(0, lambda: self.log(self.t("msg_retry", count=len(failed_files))))
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                            for filename in failed_files:
+                                if self.stop_event.is_set(): break
+                                executor.submit(self.process_single_file, grader, rubric_text, filename, failed_dir, True)
+                                time.sleep(1)
+
+            # Final Cleanup: Regenerate CSV to ensure consistency
+            self.after(0, lambda: self.log("🔄 Regenerating Summary CSV..."))
+            self.regenerate_csv_from_jsons()
+
+            if self.stop_event.is_set():
+                self.after(0, lambda: self.log(self.t("msg_stopped")))
+            else:
+                self.after(0, lambda: self.log(self.t("msg_finished")))
+                
+                # Check completion again to prompt for review
+                self.after(1000, self.check_completion_status)
+
+        except Exception as e:
+            error_msg = str(e)
+            self.after(0, lambda: self.log(self.t("msg_error", error=error_msg)))
+        finally:
+            self.processing = False
+            self.after(0, lambda: self.reset_ui_state())
+
+    def open_review_window(self):
+        if not self.exam_folder:
+            messagebox.showerror("Error", self.t("msg_select_files"))
+            return
+            
+        # Ensure JSONs exist (Legacy Support)
+        self.ensure_jsons_exist()
+        
+        try:
+            ReviewWindow(self, self.exam_folder, self.student_manager, self.on_review_save, 
+                         lang=self.current_lang, translations=TRANSLATIONS)
+        except Exception as e:
+            self.log(self.t("msg_error", error=e))
+        # db_info = data.get('db_student_info', {})
+        # md_content, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+        
+        # exam_room = db_info.get('room', '未知')
+        # seat_no = db_info.get('seat', '未知')
+
+    def on_review_save(self, data):
+        # 1. Regenerate Markdown
+        db_info = data.get('db_student_info', {})
+        md_content, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+        
+        exam_room = db_info.get('room', '未知')
+        seat_no = db_info.get('seat', '未知')
+        filename_prefix = f"{exam_room}-{seat_no}"
+        
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        save_path = os.path.join(reports_dir, f"{filename_prefix}.md")
+        
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+            
+        # 2. Update CSV (Re-generate whole CSV to be safe and simple)
+        # This might be slow for huge batches, but ensures consistency.
+        self.regenerate_csv_from_jsons()
+
+    def regenerate_csv_from_jsons(self):
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir): return
+        
+        json_files = [f for f in os.listdir(reports_dir) if f.endswith(".json")]
+        all_summaries = []
+        
+        for jf in json_files:
+            with open(os.path.join(reports_dir, jf), "r", encoding="utf-8") as f:
+                data = json.load(f)
+                db_info = data.get('db_student_info', {})
+                
+                # Re-calculate consistency/scores for summary
+                _, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+                
+                summary = {
+                    '考场': db_info.get('room', '未知'), 
+                    '座号': db_info.get('seat', '未知'), 
+                    '班级': db_info.get('class', '未知'), 
+                    '姓名': db_info.get('name', '未知'), 
+                    '考号': db_info.get('id', '未知'),
+                    '总分': data.get('total_score', 0),
+                    '信息一致性': consistency_note,
+                    '匹配项数': matches,
+                    'OCR姓名': data.get('ocr_name', ''),
+                    'OCR班级': data.get('ocr_class', ''),
+                    'OCR考场': data.get('ocr_room', ''),
+                    'OCR座号': data.get('ocr_seat', ''),
+                    'OCR手写考号': data.get('ocr_id_written', ''),
+                    'OCR填涂考号': data.get('ocr_id_filled', '')
+                }
+                summary.update(sub_scores_dict)
+                all_summaries.append(summary)
+        
+        # Sort by Room/Seat
+        def sort_key(x):
+            try: return (int(x['考场']), int(x['座号']))
+            except: return (999, 999)
+        all_summaries.sort(key=sort_key)
+        
+        # Write CSV
+        if not all_summaries: return
+        
+        import csv
+        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        
+        # Determine headers
+        base_headers = ['考场', '座号', '班级', '姓名', '考号', '总分', '信息一致性', '匹配项数']
+        ocr_headers = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号']
+        
+        # Collect all dynamic keys (subjective scores)
+        dynamic_keys = set()
+        for s in all_summaries:
+            for k in s.keys():
+                if k not in base_headers and k not in ocr_headers:
+                    dynamic_keys.add(k)
+        
+        # Sort dynamic keys: Question totals first, then sub-questions
+        def key_sort(k):
+            # 17_总分 -> (17, -1)
+            # 17(1) -> (17, 1)
+            if "_总分" in k:
+                try: return (int(k.split('_')[0]), -1)
+                except: return (999, -1)
+            match = re.match(r"(\d+)\((\d+)\)", k)
+            if match:
+                return (int(match.group(1)), int(match.group(2)))
+            if k.isdigit(): return (int(k), 0)
+            return (999, 999)
+            
+        sorted_dynamic = sorted(list(dynamic_keys), key=key_sort)
+        
+        fieldnames = base_headers + sorted_dynamic + ocr_headers
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_summaries)
+
+    def reset_ui_state(self):
+        self.btn_start.configure(state="normal")
+        self.btn_pause.configure(state="disabled", text=self.t("btn_pause"), fg_color="#D97706")
+        self.btn_stop.configure(state="disabled")
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
