@@ -14,7 +14,10 @@
 
 ## ✨ Features
 
--   **Multi-Model Support**: Seamlessly switch between OpenAI GPT-4o and Google Gemini 1.5/2.0 Pro.
+-   **Multi-Model Support**: 
+    -   Supports OpenAI (GPT-4o, GPT-4o-mini, etc.) and OpenAI-compatible APIs with custom base URLs
+    -   Supports Google Gemini (1.5 Pro, 2.0 Flash, etc.)
+    -   Easy to switch between different providers and models
 -   **Smart Recognition**: Automatically extracts handwritten student names, IDs, and class information using OCR.
 -   **Flexible Grading**: Supports custom rubrics for precise subjective question grading.
 -   **Batch Processing**: Multi-threaded processing for high-speed grading of large batches.
