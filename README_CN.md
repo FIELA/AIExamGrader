@@ -36,12 +36,19 @@
 pip install -r requirements.txt
 ```
 
-### 3. 运行程序
+### 3. 配置应用
+复制 `config.json.example` 为 `config.json` 并填入您的 API 凭证：
+```bash
+cp config.json.example config.json
+```
+然后编辑 `config.json` 添加您的 API Key。
+
+### 4. 运行程序
 ```bash
 python AutoGrader.py
 ```
 
-### 4. 打包应用 (可选)
+### 5. 打包应用 (可选)
 
 **macOS:**
 ```bash

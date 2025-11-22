@@ -36,12 +36,19 @@
 pip install -r requirements.txt
 ```
 
-### 3. Run Application
+### 3. Configure Application
+Copy `config.json.example` to `config.json` and update with your API credentials:
+```bash
+cp config.json.example config.json
+```
+Then edit `config.json` to add your API key.
+
+### 4. Run Application
 ```bash
 python AutoGrader.py
 ```
 
-### 4. Build App (Optional)
+### 5. Build App (Optional)
 
 **macOS:**
 ```bash
