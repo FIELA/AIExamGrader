@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 class ConfigManager:
     def __init__(self, config_path: str = "config.json"):
@@ -16,6 +16,12 @@ class ConfigManager:
             except Exception as e:
                 print(f"Error loading config: {e}")
                 self.config = {}
+        
+        # Ensure profiles structure exists
+        if "profiles" not in self.config:
+            self.config["profiles"] = {}
+        if "last_used" not in self.config:
+            self.config["last_used"] = ""
 
     def save_config(self):
         try:
@@ -30,3 +36,32 @@ class ConfigManager:
     def set(self, key: str, value: Any):
         self.config[key] = value
         self.save_config()
+    
+    # Profile Management Methods
+    def get_profile_names(self) -> List[str]:
+        """Get list of all saved profile names"""
+        return list(self.config.get("profiles", {}).keys())
+    
+    def save_profile(self, name: str, profile_data: Dict[str, Any]):
+        """Save a configuration profile"""
+        if "profiles" not in self.config:
+            self.config["profiles"] = {}
+        self.config["profiles"][name] = profile_data
+        self.config["last_used"] = name
+        self.save_config()
+    
+    def load_profile(self, name: str) -> Dict[str, Any]:
+        """Load a configuration profile"""
+        return self.config.get("profiles", {}).get(name, {})
+    
+    def delete_profile(self, name: str):
+        """Delete a configuration profile"""
+        if "profiles" in self.config and name in self.config["profiles"]:
+            del self.config["profiles"][name]
+            if self.config.get("last_used") == name:
+                self.config["last_used"] = ""
+            self.save_config()
+    
+    def get_last_used(self) -> str:
+        """Get the name of the last used profile"""
+        return self.config.get("last_used", "")

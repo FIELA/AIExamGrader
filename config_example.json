@@ -1,0 +1,26 @@
+{
+    "api_key": "",
+    "base_url": "",
+    "language": "CN",
+    "profiles": {
+        "Gemini Pro - Math Exam": {
+            "provider": "Gemini",
+            "api_key": "your-gemini-api-key-here",
+            "base_url": "",
+            "model": "gemini-2.5-pro-maxthinking",
+            "rubric_path": "/path/to/math_rubric.txt",
+            "exam_folder": "/path/to/math_exam_2024",
+            "student_list": "/path/to/students.xlsx"
+        },
+        "OpenAI GPT4 - English Exam": {
+            "provider": "OpenAI",
+            "api_key": "sk-your-openai-api-key-here",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "rubric_path": "/path/to/english_rubric.txt",
+            "exam_folder": "/path/to/english_exam_2024",
+            "student_list": "/path/to/students.xlsx"
+        }
+    },
+    "last_used": "Gemini Pro - Math Exam"
+}

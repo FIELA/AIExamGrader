@@ -94,32 +94,51 @@ class App(ctk.CTk):
         self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language)
         self.combo_lang.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
 
+        # ===== Configuration Profile Section =====
+        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text="Config Profile:", anchor="w")
+        self.lbl_config_profile.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
+        
+        self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.get_profile_list(), command=self.on_profile_select)
+        self.combo_profile.grid(row=4, column=0, padx=20, pady=(0, 5), sticky="ew")
+        
+        # Profile action buttons
+        self.profile_btn_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.profile_btn_frame.grid(row=5, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.profile_btn_frame.grid_columnconfigure(0, weight=1)
+        self.profile_btn_frame.grid_columnconfigure(1, weight=1)
+        
+        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text="💾 Save", command=self.save_current_profile, width=60, height=28)
+        self.btn_save_profile.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        
+        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text="🗑️ Delete", command=self.delete_current_profile, width=60, height=28, fg_color="darkred")
+        self.btn_delete_profile.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+
         # API Config
         self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text="API Key:", anchor="w")
-        self.lbl_key.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
         self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...")
-        self.entry_key.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.entry_key.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text="Base URL (Optional):", anchor="w")
-        self.lbl_base.grid(row=5, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_base.grid(row=8, column=0, padx=20, pady=(10, 0), sticky="w")
         self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...")
-        self.entry_base.grid(row=6, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.entry_base.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         # Provider & Model
         self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text="Service Provider:", anchor="w")
-        self.lbl_provider.grid(row=7, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_provider.grid(row=10, column=0, padx=20, pady=(10, 0), sticky="w")
         self.provider_var = ctk.StringVar(value="OpenAI")
         self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change)
-        self.combo_provider.grid(row=8, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.combo_provider.grid(row=11, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text="Model Name:", anchor="w")
-        self.lbl_model.grid(row=9, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_model.grid(row=12, column=0, padx=20, pady=(10, 0), sticky="w")
         self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"])
         self.combo_model.set("gemini-2.5-pro-maxthinking")
-        self.combo_model.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.combo_model.grid(row=13, column=0, padx=20, pady=(0, 10), sticky="ew")
         
         self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text="Check Models", command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"))
-        self.btn_check_model.grid(row=11, column=0, padx=20, pady=10, sticky="ew")
+        self.btn_check_model.grid(row=14, column=0, padx=20, pady=10, sticky="ew")
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -209,12 +228,124 @@ class App(ctk.CTk):
         self.current_lang = lang
         self.combo_lang.set("中文" if lang == "CN" else "English")
         
+        # Auto-load last used profile
+        last_profile = self.config_manager.get_last_used()
+        if last_profile and last_profile in self.config_manager.get_profile_names():
+            profile_data = self.config_manager.load_profile(last_profile)
+            if profile_data:
+                self.apply_profile(profile_data)
+                self.combo_profile.set(last_profile)
+                self.log(f"🔄 Auto-loaded profile: {last_profile}")
+        
         self.log(self.t("msg_config_loaded"))
 
     def save_current_config(self):
         self.config_manager.set("api_key", self.entry_key.get().strip())
         self.config_manager.set("base_url", self.entry_base.get().strip())
         self.config_manager.set("language", self.current_lang)
+    
+    # Configuration Profile Management
+    def get_profile_list(self):
+        """Get list of profile names for dropdown"""
+        profiles = self.config_manager.get_profile_names()
+        return profiles if profiles else ["<No Profiles>"]
+    
+    def on_profile_select(self, profile_name):
+        """Load selected profile"""
+        if profile_name == "<No Profiles>":
+            return
+        
+        profile_data = self.config_manager.load_profile(profile_name)
+        if profile_data:
+            self.apply_profile(profile_data)
+            self.log(f"✅ Loaded profile: {profile_name}")
+    
+    def save_current_profile(self):
+        """Save current configuration as a profile"""
+        dialog = ctk.CTkInputDialog(text="Enter profile name:", title="Save Configuration Profile")
+        profile_name = dialog.get_input()
+        
+        if not profile_name or profile_name.strip() == "":
+            return
+        
+        profile_name = profile_name.strip()
+        
+        # Gather current configuration
+        profile_data = {
+            "provider": self.provider_var.get(),
+            "api_key": self.entry_key.get().strip(),
+            "base_url": self.entry_base.get().strip(),
+            "model": self.combo_model.get(),
+            "rubric_path": self.rubric_path,
+            "exam_folder": self.exam_folder,
+            "student_list": self.student_manager.student_path if hasattr(self.student_manager, 'student_path') else ""
+        }
+        
+        # Save profile
+        self.config_manager.save_profile(profile_name, profile_data)
+        
+        # Update dropdown
+        self.combo_profile.configure(values=self.get_profile_list())
+        self.combo_profile.set(profile_name)
+        
+        self.log(f"💾 Saved profile: {profile_name}")
+    
+    def delete_current_profile(self):
+        """Delete currently selected profile"""
+        profile_name = self.combo_profile.get()
+        
+        if profile_name == "<No Profiles>":
+            messagebox.showwarning("Warning", "No profile selected to delete")
+            return
+        
+        # Confirm deletion
+        if messagebox.askyesno("Confirm Delete", f"Delete profile '{profile_name}'?"):
+            self.config_manager.delete_profile(profile_name)
+            
+            # Update dropdown
+            profiles = self.get_profile_list()
+            self.combo_profile.configure(values=profiles)
+            if profiles:
+                self.combo_profile.set(profiles[0])
+            
+            self.log(f"🗑️ Deleted profile: {profile_name}")
+    
+    def apply_profile(self, profile_data):
+        """Apply a profile's configuration to the UI"""
+        # Set API settings
+        if "api_key" in profile_data:
+            self.entry_key.delete(0, "end")
+            self.entry_key.insert(0, profile_data["api_key"])
+        
+        if "base_url" in profile_data:
+            self.entry_base.delete(0, "end")
+            self.entry_base.insert(0, profile_data["base_url"])
+        
+        if "provider" in profile_data:
+            self.provider_var.set(profile_data["provider"])
+            self.on_provider_change(profile_data["provider"])
+        
+        if "model" in profile_data:
+            self.combo_model.set(profile_data["model"])
+        
+        # Set file paths
+        if "rubric_path" in profile_data and profile_data["rubric_path"]:
+            self.rubric_path = profile_data["rubric_path"]
+            if os.path.exists(self.rubric_path):
+                self.lbl_rubric_status.configure(text=os.path.basename(self.rubric_path), text_color=("green", "lightgreen"))
+        
+        if "exam_folder" in profile_data and profile_data["exam_folder"]:
+            self.exam_folder = profile_data["exam_folder"]
+            if os.path.exists(self.exam_folder):
+                self.lbl_folder_status.configure(text=os.path.basename(self.exam_folder), text_color=("green", "lightgreen"))
+        
+        if "student_list" in profile_data and profile_data["student_list"]:
+            student_path = profile_data["student_list"]
+            if os.path.exists(student_path):
+                count = self.student_manager.load_students(student_path)
+                if count > 0:
+                    self.lbl_list_status.configure(text=f"{count} students", text_color=("green", "lightgreen"))
+
 
     def t(self, key, **kwargs):
         """Translate helper"""

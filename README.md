@@ -14,13 +14,15 @@
 
 ## ✨ Features
 
+### Core Capabilities
+
 -   **Multi-Model Support**: 
     -   Supports OpenAI (GPT-4o, GPT-4o-mini, etc.) and OpenAI-compatible APIs with custom base URLs
-    -   Supports Google Gemini (3.0 Pro, 2.5 Flash, etc.)
+    -   Supports Google Gemini (gemini-2.5-pro, gemini-2.0-flash, etc.)
     -   Easy to switch between different providers and models
     
     > [!NOTE]
-    > This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 3.0 Pro).
+    > This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 2.5 Pro).
     
 -   **Smart Recognition**: Automatically extracts handwritten student names, IDs, and class information using OCR.
 -   **Flexible Grading**: Supports custom rubrics for precise subjective question grading.
@@ -31,6 +33,20 @@
     -   Generates individual Markdown grading reports for each student.
     -   Automatically compiles a CSV summary with detailed scores for every question.
 -   **Internationalization**: Fully localized interface in English and Simplified Chinese.
+
+### New Features (v1.1)
+
+-   **🚀 Configuration Profiles**: Save and quickly switch between different grading configurations
+    -   Save multiple profiles with different API keys, models, and file paths
+    -   Quick switch via dropdown menu in sidebar
+    -   Auto-loads last used profile on startup
+    -   Perfect for managing multiple exams or switching between API providers
+    
+-   **📊 Enhanced Progress Tracking**: 
+    -   Real-time progress display with accurate file counting
+    -   Phase-based processing (Main → Failed Retry → Verification)
+    -   Estimated Time Remaining (ETR) updates
+    -   Final verification counts for quality assurance
 
 ## 🚀 Quick Start
 
@@ -44,20 +60,21 @@ pip install -r requirements.txt
 ```
 
 ### 3. Configure Application
-Copy `config.json.example` to `config.json` and update with your API credentials:
+
+**Method 1: Using Configuration Profiles (Recommended)**
+
+Copy the example configuration file:
 ```bash
-cp config.json.example config.json
+cp config_example.json config.json
 ```
 
-Then edit `config.json` to configure the following parameters:
+Edit `config.json` with your actual API keys and file paths. The example file includes two sample profiles that you can customize.
 
-- **api_key**: Your API key
-- **base_url**: API endpoint URL (optional)
-  - OpenAI official: leave empty or use `https://api.openai.com/v1`
-  - Gemini official: leave empty (the app will use the official endpoint automatically)
-  - Third-party OpenAI-compatible services: provide your custom endpoint
-- **provider**: Service provider type (`openai` or `gemini`)
-- **model**: Model name (e.g., `gpt-4o`, `gemini-3.0-pro`)
+**Method 2: Manual Configuration**
+
+You can also configure settings directly in the application interface (saved automatically).
+
+See [README_CONFIG.md](README_CONFIG.md) for detailed configuration guide.
 
 ### 4. Run Application
 ```bash
@@ -81,31 +98,80 @@ The executable folder will be generated in the `dist/` folder.
 ## 🛠️ Usage Guide
 
 ### 1. Configuration
--   **API Key**: Enter your OpenAI or Google Gemini API Key in the sidebar.
--   **Provider**: Select your preferred service provider.
--   **Model**: Choose the model (e.g., `gpt-4o`, `gemini-1.5-pro`).
+
+#### Using Configuration Profiles
+-   **Select Profile**: Choose from saved profiles in the dropdown menu
+-   **Save Profile**: Click 💾 Save to save current settings as a new profile
+-   **Delete Profile**: Select a profile and click 🗑️ Delete to remove it
+
+#### Manual Configuration
+-   **API Key**: Enter your OpenAI or Google Gemini API Key in the sidebar
+-   **Provider**: Select your preferred service provider
+-   **Model**: Choose the model (e.g., `gpt-4o`, `gemini-2.5-pro-maxthinking`)
+-   **Base URL**: (Optional) For custom API endpoints
 
 ### 2. Prepare Resources
--   **Rubric**: A text file containing questions, standard answers, and scoring rules.
--   **Exam Folder**: A folder containing images of student exam papers (supported formats: .jpg, .png).
--   **Student List**: (Optional) An Excel/CSV file containing student roster for validation.
+-   **Rubric**: A text file containing questions, standard answers, and scoring rules
+-   **Exam Folder**: A folder containing images of student exam papers (supported formats: .jpg, .png, .jpeg)
+-   **Student List**: (Optional) An Excel/CSV file containing student roster for validation
 
 ### 3. Start Grading
--   Click **Start Grading**.
--   The system will process images in parallel.
--   Real-time progress and Estimated Time Remaining (ETR) will be displayed.
+-   Click **▶️ Start Grading**
+-   The system will:
+    1. Detect answer sheet layout (first-time only, saved for reuse)
+    2. Process all pending files in parallel
+    3. Retry failed files automatically
+    4. Verify final counts
+-   Real-time progress and Estimated Time Remaining (ETR) will be displayed
 
 ### 4. Manual Review
--   After grading, you can enter **Manual Review** mode.
--   Verify student information, objective scores, and subjective grading.
--   Make corrections if necessary; the system will update reports and the CSV summary automatically.
+-   After grading, click **🔍 Review**
+-   Verify student information, objective scores, and subjective grading
+-   Make corrections if necessary
+-   The system will update reports and CSV summary automatically
 
 ### 5. View Results
--   **Reports**: Individual `.md` files in `[Exam Folder]/reports/`.
--   **Summary**: A consolidated `成绩汇总表.csv` in the exam folder.
+-   **Reports**: Individual `.md` and `.json` files in `[Exam Folder]/reports/`
+-   **Summary**: A consolidated `成绩汇总表.csv` (or `Grade_Summary.csv`) in the exam folder
+
+## 📂 Project Structure
+
+```
+AIExamGrader/
+├── AutoGrader.py           # Main application
+├── config_manager.py       # Configuration management
+├── student_manager.py      # Student database management
+├── grader_engine.py        # AI grading engine
+├── review_window.py        # Manual review interface
+├── translations.py         # Internationalization
+├── config_example.json     # Example configuration with profiles
+├── README_CONFIG.md        # Configuration guide
+├── requirements.txt        # Dependencies
+└── build.py               # Application builder
+```
+
+## 🔧 Configuration Files
+
+-   `config.json`: Main configuration file (created from `config_example.json`)
+-   `config_example.json`: Example configuration with sample profiles
+-   See [README_CONFIG.md](README_CONFIG.md) for detailed configuration documentation
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📄 License
 
-This project is licensed under the Non-Commercial Educational License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Non-Commercial Educational License (NCEL-1.0) - see the [LICENSE](LICENSE) file for details.
 
-**For commercial use, please contact JASim for licensing options.**
+**For commercial use, please contact the project author for licensing options.**
+
+## 💬 Contact
+
+For questions, suggestions, or commercial licensing inquiries, please contact:
+- **Email**: [Your Email]
+- **GitHub Issues**: [Project Issues Page]
+
+---
+
+Made with ❤️ for educators worldwide

@@ -1,7 +1,0 @@
-{
-  "api_key": "YOUR_API_KEY_HERE",
-  "base_url": "",
-  "provider": "openai",
-  "model": "gpt-4o"
-}
-
