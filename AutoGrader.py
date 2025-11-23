@@ -358,16 +358,25 @@ class App(ctk.CTk):
         self.log(f"🔍 Starting detailed verification for {total_images} files...")
 
         # 2. Load CSV Data for quick lookup
-        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
         csv_data = set() # Stores (Room, Seat) tuples
-        if os.path.exists(csv_path):
+        
+        csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
+        csv_path = None
+        for name in csv_names:
+            p = os.path.join(self.exam_folder, name)
+            if os.path.exists(p):
+                csv_path = p
+                break
+                
+        if csv_path:
             try:
                 import csv
                 with open(csv_path, 'r', encoding='utf-8-sig') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        r = row.get('考场', '').strip()
-                        s = row.get('座号', '').strip()
+                        # Handle localized headers
+                        r = (row.get('考场') or row.get('Room') or '').strip()
+                        s = (row.get('座号') or row.get('Seat') or '').strip()
                         if r and s: csv_data.add((r, s))
             except Exception as e:
                 self.log(f"⚠️ Failed to read CSV: {e}")
@@ -558,20 +567,45 @@ class App(ctk.CTk):
 
     def write_summary_csv(self, data_dict):
         import csv
-        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
         
-        # Dynamic headers based on data_dict keys
-        priority = ['考场', '座号', '班级', '姓名', '考号', '客观题', '总分', 
-                    'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
+        is_en = (self.current_lang == "EN")
+        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
+        csv_path = os.path.join(self.exam_folder, csv_filename)
         
-        headers = list(data_dict.keys())
-        remaining = [h for h in headers if h not in priority and h != '原始文件']
+        # Header Mappings
+        header_map = {
+            '考场': 'Room', '座号': 'Seat', '班级': 'Class', '姓名': 'Name', '考号': 'ID',
+            '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
+            'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
+            'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
+            '原始文件': 'Original File', '客观题': 'Objective Score'
+        }
+        
+        # Translate data_dict keys if EN
+        final_data = {}
+        if is_en:
+            for k, v in data_dict.items():
+                new_key = header_map.get(k, k)
+                final_data[new_key] = v
+        else:
+            final_data = data_dict
+
+        # Dynamic headers based on final_data keys
+        if is_en:
+            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Objective Score', 'Total Score', 
+                        'OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
+        else:
+            priority = ['考场', '座号', '班级', '姓名', '考号', '客观题', '总分', 
+                        'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
+        
+        headers = list(final_data.keys())
+        remaining = [h for h in headers if h not in priority and h != ('Original File' if is_en else '原始文件')]
         
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
         
         remaining.sort(key=natural_sort_key)
-        sorted_headers = priority + remaining + ['原始文件']
+        sorted_headers = priority + remaining + [('Original File' if is_en else '原始文件')]
 
         with self.write_lock:
             file_exists = os.path.isfile(csv_path)
@@ -590,7 +624,7 @@ class App(ctk.CTk):
                     writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
                     if not file_exists:
                         writer.writeheader()
-                    writer.writerow(data_dict)
+                    writer.writerow(final_data)
             except Exception as e:
                 self.after(0, lambda: self.log(f"⚠️ Write CSV failed: {str(e)}"))
 
@@ -1070,6 +1104,18 @@ class App(ctk.CTk):
         json_files = [f for f in os.listdir(reports_dir) if f.endswith(".json")]
         all_summaries = []
         
+        is_en = (self.current_lang == "EN")
+        
+        # Header Mappings
+        # Key: Internal Key (CN), Value: Display Key (EN)
+        header_map = {
+            '考场': 'Room', '座号': 'Seat', '班级': 'Class', '姓名': 'Name', '考号': 'ID',
+            '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
+            'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
+            'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
+            '复审状态': 'Review Status'
+        }
+        
         for jf in json_files:
             with open(os.path.join(reports_dir, jf), "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -1077,6 +1123,14 @@ class App(ctk.CTk):
                 
                 # Re-calculate consistency/scores for summary
                 _, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+                
+                # Determine Review Status
+                review_count = data.get('review_count', 0)
+                review_status = ""
+                if review_count == 1:
+                    review_status = "Reviewed" if is_en else "已复审"
+                elif review_count >= 2:
+                    review_status = "Second Review" if is_en else "已二次复审"
                 
                 summary = {
                     '考场': db_info.get('room', '未知'), 
@@ -1092,14 +1146,31 @@ class App(ctk.CTk):
                     'OCR考场': data.get('ocr_room', ''),
                     'OCR座号': data.get('ocr_seat', ''),
                     'OCR手写考号': data.get('ocr_id_written', ''),
-                    'OCR填涂考号': data.get('ocr_id_filled', '')
+                    'OCR填涂考号': data.get('ocr_id_filled', ''),
+                    '复审状态': review_status
                 }
                 summary.update(sub_scores_dict)
-                all_summaries.append(summary)
+                
+                # If EN, translate keys in summary
+                if is_en:
+                    new_summary = {}
+                    for k, v in summary.items():
+                        new_key = header_map.get(k, k)
+                        # Also translate consistency values if needed? 
+                        # consistency_note is generated in generate_report_content which is hardcoded CN for now.
+                        # Ideally generate_report_content should also be localized, but user asked for CSV mainly.
+                        # Let's keep values as is for now unless requested.
+                        new_summary[new_key] = v
+                    all_summaries.append(new_summary)
+                else:
+                    all_summaries.append(summary)
         
         # Sort by Room/Seat
         def sort_key(x):
-            try: return (int(x['考场']), int(x['座号']))
+            try: 
+                r = x.get('Room') if is_en else x.get('考场')
+                s = x.get('Seat') if is_en else x.get('座号')
+                return (int(r), int(s))
             except: return (999, 999)
         all_summaries.sort(key=sort_key)
         
@@ -1107,11 +1178,16 @@ class App(ctk.CTk):
         if not all_summaries: return
         
         import csv
-        csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
+        csv_path = os.path.join(self.exam_folder, csv_filename)
         
         # Determine headers
-        base_headers = ['考场', '座号', '班级', '姓名', '考号', '总分', '信息一致性', '匹配项数']
-        ocr_headers = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号']
+        if is_en:
+            base_headers = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Total Score', 'Consistency', 'Matches', 'Review Status']
+            ocr_headers = ['OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID']
+        else:
+            base_headers = ['考场', '座号', '班级', '姓名', '考号', '总分', '信息一致性', '匹配项数', '复审状态']
+            ocr_headers = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号']
         
         # Collect all dynamic keys (subjective scores)
         dynamic_keys = set()
@@ -1120,10 +1196,8 @@ class App(ctk.CTk):
                 if k not in base_headers and k not in ocr_headers:
                     dynamic_keys.add(k)
         
-        # Sort dynamic keys: Question totals first, then sub-questions
+        # Sort dynamic keys
         def key_sort(k):
-            # 17_总分 -> (17, -1)
-            # 17(1) -> (17, 1)
             if "_总分" in k:
                 try: return (int(k.split('_')[0]), -1)
                 except: return (999, -1)
