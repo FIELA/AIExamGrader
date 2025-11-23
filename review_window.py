@@ -384,16 +384,31 @@ class ReviewWindow(ctk.CTkToplevel):
             # Legacy Support: Try to load from CSV
             csv_score = 0
             csv_obj_score = 0
-            csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
-            if os.path.exists(csv_path):
+            
+            # Try both Chinese and English filenames
+            csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
+            csv_path = None
+            for name in csv_names:
+                p = os.path.join(self.exam_folder, name)
+                if os.path.exists(p):
+                    csv_path = p
+                    break
+            
+            if csv_path:
                 try:
                     with open(csv_path, 'r', encoding='utf-8-sig') as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            if str(row.get('考场')) == room and str(row.get('座号')) == seat:
-                                try: csv_score = float(row.get('总分', 0))
+                            # Handle localized headers
+                            r_val = row.get('考场') or row.get('Room')
+                            s_val = row.get('座号') or row.get('Seat')
+                            
+                            if str(r_val) == room and str(s_val) == seat:
+                                try: 
+                                    csv_score = float(row.get('总分') or row.get('Total Score', 0))
                                 except: pass
-                                try: csv_obj_score = float(row.get('客观题', 0))
+                                try: 
+                                    csv_obj_score = float(row.get('客观题') or row.get('Objective Score', 0))
                                 except: pass
                                 break
                 except: pass
@@ -909,6 +924,10 @@ class ReviewWindow(ctk.CTkToplevel):
         seat = str(self.current_data.get('db_student_info', {}).get('seat', '未知'))
         json_name = f"{room}-{seat}.json"
         json_path = os.path.join(self.reports_dir, json_name)
+        
+        # Increment Review Count
+        current_count = self.current_data.get('review_count', 0)
+        self.current_data['review_count'] = current_count + 1
         
         try:
             with open(json_path, "w", encoding="utf-8") as f:
