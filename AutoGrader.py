@@ -1126,6 +1126,15 @@ class App(ctk.CTk):
                 self.completed_count += 1
                 self.session_completed_count += 1
             
+            # If this was a retry, move the file from failed back to main folder
+            if is_retry:
+                try:
+                    dest_main = os.path.join(self.exam_folder, filename)
+                    shutil.move(image_path, dest_main)
+                    self.after(0, lambda fn=filename: self.log(f"♻️ {fn} 已从失败文件夹移回"))
+                except Exception as e:
+                    self.after(0, lambda fn=filename: self.log(f"⚠️ 无法移动 {fn}: {str(e)}"))
+            
             # Update UI and log (outside lock)
             self.after(0, lambda: self.update_progress_ui())
             self.after(0, lambda fn=filename: self.log(f"✅ {fn}"))
@@ -1147,8 +1156,8 @@ class App(ctk.CTk):
             grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
             valid_extensions = ('.png', '.jpg', '.jpeg')
             
+            # ===== PHASE 1: Main Folder Processing =====
             files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
-            self.total_files = len(files)
             
             pending_files = []
             
@@ -1157,9 +1166,6 @@ class App(ctk.CTk):
                 failed_dir = os.path.join(self.exam_folder, "failed")
                 
                 for fname in target_files:
-                    # If in failed dir, move back to main first? 
-                    # Or just process from there? 
-                    # Better to move back to main so structure is clean.
                     src_failed = os.path.join(failed_dir, fname)
                     dest_main = os.path.join(self.exam_folder, fname)
                     
@@ -1184,17 +1190,27 @@ class App(ctk.CTk):
                     md_name = f"{exam_room}-{seat_no}.md"
                     md_path = os.path.join(self.exam_folder, "reports", md_name)
                     
-                    if os.path.exists(md_path):
-                        # Already done
-                        pass
-                    else:
+                    if not os.path.exists(md_path):
                         pending_files.append(f)
             
-            self.completed_count = self.total_files - len(pending_files)
+            # Check failed folder count
+            failed_dir = os.path.join(self.exam_folder, "failed")
+            failed_count = 0
+            if os.path.exists(failed_dir):
+                failed_count = len([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
+            
+            # Set total to PENDING files only
+            self.total_files = len(pending_files)
+            self.completed_count = 0
             self.after(0, lambda: self.update_progress_ui())
             
-            self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=len(pending_files))))
+            # Log start with failed count
+            if failed_count > 0:
+                self.after(0, lambda fc=failed_count: self.log(f"🚀 启动处理，共 {self.total_files} 张，失败文件夹中有 {fc} 张"))
+            else:
+                self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=self.total_files)))
             
+            # Process pending files
             if pending_files:
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
                 try:
@@ -1202,8 +1218,8 @@ class App(ctk.CTk):
                     for idx, filename in enumerate(pending_files):
                         if self.stop_event.is_set(): 
                             break
-                        # Pass sequential file number (completed + idx + 1)
-                        file_num = self.completed_count + idx + 1
+                        # Sequential numbering starting from 1
+                        file_num = idx + 1
                         f = executor.submit(self.process_single_file, grader, rubric_text, filename, self.exam_folder, False, file_num)
                         futures.append(f)
                         time.sleep(1)  # Stagger requests by 1 second 
@@ -1217,29 +1233,69 @@ class App(ctk.CTk):
                                 future.cancel()
                             break
                 finally:
-                    executor.shutdown(wait=False)
+                    executor.shutdown(wait=True)  # Wait for all to complete
             
-            # Retry failed (Only in normal mode, or if requested?)
-            # In targeted mode, we just tried them. If they fail again, they go to failed.
+            # ===== PHASE 2: Retry Failed Files =====
             if not target_files and not self.stop_event.is_set():
                 failed_dir = os.path.join(self.exam_folder, "failed")
                 if os.path.exists(failed_dir):
                     failed_files = [f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)]
                     if failed_files:
-                        self.after(0, lambda: self.log(self.t("msg_retry", count=len(failed_files))))
+                        # Update total_files for failed retry phase
+                        self.total_files = len(failed_files)
+                        self.completed_count = 0
+                        
+                        self.after(0, lambda fc=len(failed_files): self.log(f"🔄 正在重试 {fc} 个失败文件..."))
+                        
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
                         try:
-                            for filename in failed_files:
+                            futures = []
+                            for idx, filename in enumerate(failed_files):
                                 if self.stop_event.is_set(): break
-                                executor.submit(self.process_single_file, grader, rubric_text, filename, failed_dir, True)
+                                file_num = idx + 1
+                                f = executor.submit(self.process_single_file, grader, rubric_text, filename, failed_dir, True, file_num)
+                                futures.append(f)
                                 time.sleep(1)
+                            
+                            # Wait for all retry futures
+                            while futures:
+                                done, futures = concurrent.futures.wait(futures, timeout=0.5, return_when=concurrent.futures.FIRST_COMPLETED)
+                                if self.stop_event.is_set():
+                                    for future in futures:
+                                        future.cancel()
+                                    break
                         finally:
-                            executor.shutdown(wait=False)
+                            executor.shutdown(wait=True)
 
-            # Final Cleanup: Regenerate CSV to ensure consistency
+            # ===== PHASE 3: Final Verification =====
             if not self.stop_event.is_set():
+                # Wait a bit for any pending writes to complete
+                time.sleep(2)
+                
                 self.after(0, lambda: self.log("🔄 Regenerating Summary CSV..."))
                 self.regenerate_csv_from_jsons()
+                
+                # Final count verification
+                self.after(0, lambda: self.log("📊 Verifying final counts..."))
+                total_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+                
+                reports_dir = os.path.join(self.exam_folder, "reports")
+                if os.path.exists(reports_dir):
+                    json_count = len([f for f in os.listdir(reports_dir) if f.endswith('.json')])
+                    md_count = len([f for f in os.listdir(reports_dir) if f.endswith('.md')])
+                else:
+                    json_count = md_count = 0
+                
+                csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+                csv_rows = 0
+                if os.path.exists(csv_path):
+                    try:
+                        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                            csv_rows = sum(1 for line in f) - 1  # Exclude header
+                    except: pass
+                
+                self.after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows: 
+                    self.log(f"📊 答题卡: {ti}, JSON: {jc}, Markdown: {mc}, CSV: {cr}"))
 
             if self.stop_event.is_set():
                 self.after(0, lambda: self.log(self.t("msg_stopped")))
