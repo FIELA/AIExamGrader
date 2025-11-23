@@ -30,4 +30,4 @@ We love new ideas! If you have a feature request, please open an issue and descr
 - Add comments where necessary to explain complex logic.
 
 ## License
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Non-Commercial Educational License (NCEL-1.0).
