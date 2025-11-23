@@ -97,7 +97,18 @@ TRANSLATIONS = {
         "msg_incomplete_body": "{msg}\n是否补足缺失的条目？\n(将重新阅卷并覆盖现有数据)",
         "msg_targeted_start": "🚀 开始定向补全 {count} 个条目...",
         "msg_restored": "♻️ 已从失败文件夹恢复: {filename}",
-        "msg_targeted_ready": "🎯 定向批次: {count} 个文件就绪。"
+        "msg_targeted_ready": "🎯 定向批次: {count} 个文件就绪。",
+        
+        # Layout Detection
+        "lbl_detecting": "🔍 正在分析答题卡布局 (抽样 {current}/{total})...",
+        "msg_detecting": "🔍 正在检测布局 (样本 {current}/{total})...",
+        "lbl_consolidating": "🧠 正在汇总布局信息...",
+        "msg_consolidating": "🔄 正在整合布局信息...",
+        "title_confirm_layout": "确认答题卡布局",
+        "msg_confirm_layout": "AI 已自动分析答题卡布局，请确认或修改下方的描述：",
+        "btn_confirm_start": "✅ 确认并开始阅卷",
+        "msg_detect_failed": "⚠️ 布局分析失败: {error}",
+        "msg_ready_start": "✨ 发现 {count} 个文件。就绪，请点击“开始阅卷”。"
     },
     "EN": {
         "app_title": "Mac AI Exam Grader (Pro)",
@@ -197,6 +208,17 @@ TRANSLATIONS = {
         "msg_incomplete_body": "{msg}\nDo you want to complete grading for these items?\n(This will re-grade them and overwrite existing data)",
         "msg_targeted_start": "🚀 Starting targeted grading for {count} items...",
         "msg_restored": "♻️ Restored {filename} from failed folder.",
-        "msg_targeted_ready": "🎯 Targeted Batch: {count} files ready."
+        "msg_targeted_ready": "🎯 Targeted Batch: {count} files ready.",
+        
+        # Layout Detection
+        "lbl_detecting": "🔍 Detecting Layout (Sample {current}/{total})...",
+        "msg_detecting": "🔍 Detecting layout (Sample {current}/{total})...",
+        "lbl_consolidating": "🧠 Consolidating Layout Info...",
+        "msg_consolidating": "🔄 Consolidating layout information...",
+        "title_confirm_layout": "Confirm Layout",
+        "msg_confirm_layout": "AI has analyzed the answer sheet layout. Please confirm or edit the description below:",
+        "btn_confirm_start": "✅ Confirm & Start",
+        "msg_detect_failed": "⚠️ Detection Failed: {error}",
+        "msg_ready_start": "✨ Found {count} files. Ready to start grading."
     }
 }

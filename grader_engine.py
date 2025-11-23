@@ -60,11 +60,9 @@ class AIGraderEngine:
         except Exception as e:
             raise Exception(str(e))
 
-    def grade_exam(self, rubric_text, image_path):
+    def grade_exam(self, rubric_text, image_path, layout_description=None):
         # --- Prompt 针对特定版式优化 ---
-        system_prompt = """
-        你是一个专业的阅卷助手。请根据【评分细则】批改【答题卡图片】。
-        
+        default_layout = """
         ### ⚠️ 答题卡布局说明 (务必遵守)
         该答题卡分为 **左栏** 和 **右栏**：
         
@@ -84,6 +82,15 @@ class AIGraderEngine:
            - **第18题**：位于**右栏上方**。
            - **第19题**：位于**右栏下方**。
            - **任务**：识别手写文字，严格按照评分细则打分，给出每个**小题**（如17(1), 17(2)）的得分。
+        """
+        
+        # Use custom layout if provided
+        layout_section = layout_description if layout_description else default_layout
+
+        system_prompt = f"""
+        你是一个专业的阅卷助手。请根据【评分细则】批改【答题卡图片】。
+        
+        {layout_section}
 
         ### 输出要求
         请输出严格的 JSON 格式，不要包含 Markdown 标记。
@@ -102,7 +109,7 @@ class AIGraderEngine:
         - `error_analysis`: 字符串，分析失分原因 (例如: "未提到地形影响")
         
         JSON 结构示例：
-        {
+        {{
             "ocr_name": "刘鑫", 
             "ocr_class": "701",
             "ocr_room": "01",
@@ -110,8 +117,8 @@ class AIGraderEngine:
             "ocr_id_written": "23090828",
             "ocr_id_filled": "23090828",
             "details": [ 
-                {"question_id": "1", "type": "客观题", "student_answer": "A", "standard_answer": "B", "score": 0, "max_score": 2},
-                {
+                {{"question_id": "1", "type": "客观题", "student_answer": "A", "standard_answer": "B", "score": 0, "max_score": 2}},
+                {{
                     "question_id": "17(1)", 
                     "type": "主观题", 
                     "student_text": "...", 
@@ -119,10 +126,10 @@ class AIGraderEngine:
                     "max_score": 3,
                     "scoring_points": "提到寒暖流交汇得2分",
                     "error_analysis": "未提到饵料丰富，扣1分"
-                }
+                }}
             ], 
             "total_score": 85
-        }
+        }}
         """
         user_prompt = f"评分细则如下：\n{rubric_text}\n\n请批改这张答题卡。注意左右分栏布局。"
 
@@ -150,3 +157,84 @@ class AIGraderEngine:
                 
         except Exception as e:
             return {"error": str(e)}
+
+    def detect_regions(self, image_path):
+        """
+        Detects the layout of the answer sheet.
+        Returns a description string.
+        """
+        prompt = """
+    请仔细分析这张答题卡图片的布局，并生成一段详细的【布局说明】。
+    请重点关注以下区域的位置（左栏/右栏/顶部/中部/底部）和特征：
+    1. **基本信息区**：学生填写姓名、班级、考号的位置。考号是手写还是填涂？
+    2. **客观题/选择题区域**（请务必完整描述）：
+       - **情况一**：如果答题卡设置了标准的机读填涂区（提供A/B/C/D选项的填涂点），请指出其具体位置。
+       - **情况二**：如果答题卡未设置标准的机读填涂区，学生需手写答案，请在输出中明确说明：
+         * 手写区域的具体位置（如：位于注意事项区域下方的空白位置）
+         * **必须说明两种手写方式**：
+           1. **带题号格式**：学生按题号手写，如"1.A 2.B"或"1-5 DCADB"
+           2. **不带题号格式**：学生连续手写字母，如"CBD ACBDC"，此时需严格按照从左到右、从上到下的顺序识别
+         * **必须提醒**：需要正确识别学生的涂改痕迹，以最终修改后的答案为准
+    3. **主观题区**：各题号（如17, 18, 19题）分别位于答题卡的什么位置？
+    4. **注意事项区**：是否有注意事项区域？
+
+    请直接输出一段清晰的描述文本，用于指导后续的阅卷模型。
+    【重要】：对于客观题区域，如果是手写形式，务必在输出中明确说明上述两种手写方式和涂改识别要求。
+    
+    格式参考：
+    ### 答题卡布局说明
+    该答题卡分为...
+    **1. 基本信息区**...
+    **2. 客观题区域**...（如为手写，必须说明带题号和不带题号两种格式，以及涂改识别）
+    **3. 主观题区域**...
+    """
+        
+        try:
+            if self.provider == "OpenAI":
+                base64_image = self.encode_image(image_path)
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "user", "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        ]}
+                    ]
+                )
+                return response.choices[0].message.content
+            elif self.provider == "Gemini":
+                img_obj = Image.open(image_path)
+                response = self.gemini_model.generate_content([prompt, img_obj])
+                return response.text
+        except Exception as e:
+            return f"Detection failed: {str(e)}"
+
+    def consolidate_layout(self, descriptions):
+        """
+        Consolidates multiple layout descriptions into one robust description.
+        """
+        if not descriptions: return ""
+        
+        prompt = f"""
+        以下是对同一种答题卡布局的 {len(descriptions)} 次观察描述。
+        请综合这些描述，生成一份最准确、通用的【答题卡布局说明】。
+        请去除偶然的错误，保留共性特征。
+        输出格式要求：直接输出描述文本，不要包含“根据描述...”等废话。
+        
+        --- 描述列表 ---
+        {json.dumps(descriptions, ensure_ascii=False)}
+        """
+        
+        try:
+            if self.provider == "OpenAI":
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.choices[0].message.content
+            elif self.provider == "Gemini":
+                response = self.gemini_model.generate_content(prompt)
+                return response.text
+        except Exception as e:
+            return descriptions[0] # Fallback
+

@@ -34,7 +34,7 @@ class App(ctk.CTk):
         self.exam_folder = ""
         
         self.processing = False
-        self.write_lock = threading.Lock()
+        self.write_lock = threading.RLock()  # Use RLock for reentrant locking
         self.completed_count = 0
         self.total_files = 0
         
@@ -48,6 +48,10 @@ class App(ctk.CTk):
         self.session_completed_count = 0
 
         self.current_lang = "CN" # Default language
+        
+        # Template Detection State
+        self.layout_description = None
+        self.template_confirmed = False
         
         self.setup_ui()
         self.load_initial_config()
@@ -432,32 +436,32 @@ class App(ctk.CTk):
 
     def handle_verification_result(self, total, missing_reports, missing_csv, missing_jsons, failed_files):
         if not missing_reports and not missing_csv and not missing_jsons and not failed_files:
-            self.log(f"✅ Verification Passed! All {total} files have Reports, JSONs, and CSV entries.")
+            self.log(self.t("msg_verification_pass"))
             
-            if messagebox.askyesno("Grading Complete", "Grading finished successfully!\nDo you want to enter Manual Review mode now?\n阅卷完成！是否现在进入人工复审模式？"):
+            if messagebox.askyesno(self.t("msg_grading_complete"), self.t("msg_enter_review")):
                 self.after(100, self.open_review_window)
         else:
-            msg = f"⚠️ Verification Incomplete / 发现缺失 ({total} files):\n"
+            msg = self.t("msg_verification_fail", total=total) + "\n"
             
             missing_set = set()
             
             if missing_reports:
-                msg += f"- Missing Reports: {len(missing_reports)}\n"
+                msg += self.t("msg_missing_reports", count=len(missing_reports)) + "\n"
                 missing_set.update(missing_reports)
             if missing_jsons:
-                msg += f"- Missing JSONs: {len(missing_jsons)}\n"
+                msg += self.t("msg_missing_jsons", count=len(missing_jsons)) + "\n"
                 missing_set.update(missing_jsons)
             if missing_csv:
-                msg += f"- Missing CSV Entries: {len(missing_csv)}\n"
+                msg += self.t("msg_missing_csv", count=len(missing_csv)) + "\n"
                 missing_set.update(missing_csv)
             if failed_files:
-                msg += f"- Failed Files: {len(failed_files)}\n"
+                msg += self.t("msg_failed_files", count=len(failed_files)) + "\n"
                 missing_set.update(failed_files)
                 
             self.log(msg)
             
             # Prompt to fix
-            if messagebox.askyesno("Incomplete Grading", f"{msg}\nDo you want to complete grading for these {len(missing_set)} items?\n(This will re-grade them and overwrite existing data)\n是否补足缺失的条目？"):
+            if messagebox.askyesno(self.t("msg_incomplete_title"), self.t("msg_incomplete_body", msg=msg)):
                 self.start_targeted_grading(list(missing_set))
 
     def ensure_jsons_exist(self):
@@ -488,14 +492,6 @@ class App(ctk.CTk):
             json_path = os.path.join(reports_dir, json_name)
             
             if not os.path.exists(json_path):
-                # Reconstruct minimal data
-                # Find original filename via StudentManager is hard efficiently without reverse map
-                # But ReviewWindow needs it.
-                # Let's try to find it by iterating students? Slow.
-                # Or just leave original_filename empty and let ReviewWindow handle it (it won't show image).
-                # Better: StudentManager.get_filename_by_student(room, seat) - need to implement?
-                # For now, let's just save what we have.
-                
                 data = {
                     'total_score': row.get('总分', 0),
                     'ocr_name': row.get('OCR姓名', ''),
@@ -511,20 +507,57 @@ class App(ctk.CTk):
                         'room': room,
                         'seat': seat
                     },
-                    'details': [] # We can't easily reconstruct details from CSV flat columns without parsing logic
+                    'details': [] 
                 }
-                
-                # Try to populate details from dynamic CSV columns?
-                # It's complex. For now, create a placeholder so it opens.
-                # If user edits, it might overwrite/mess up.
-                # Maybe better to NOT create JSON and let ReviewWindow filter?
-                # But ReviewWindow iterates JSONs.
-                
-                # Let's write it.
                 try:
                     with open(json_path, 'w', encoding='utf-8') as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                 except: pass
+
+    def load_layout_config(self):
+        if not self.exam_folder: return
+        config_path = os.path.join(self.exam_folder, "layout_config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.layout_description = data.get("layout_description")
+                    if self.layout_description:
+                        self.template_confirmed = True
+                        self.log("📄 Loaded saved layout configuration.")
+            except Exception as e:
+                self.log(f"⚠️ Failed to load layout config: {e}")
+
+    def save_layout_config(self):
+        if not self.exam_folder or not self.layout_description: return
+        config_path = os.path.join(self.exam_folder, "layout_config.json")
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump({"layout_description": self.layout_description}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"⚠️ Failed to save layout config: {e}")
+
+    def ensure_layout_and_run(self, callback):
+        """
+        Ensures layout is confirmed before running the callback.
+        1. Check if confirmed.
+        2. If not, try load.
+        3. If not loaded, run detection.
+        4. Show confirmation.
+        5. Save and run.
+        """
+        if self.template_confirmed:
+            callback()
+            return
+
+        # Try load
+        self.load_layout_config()
+        if self.template_confirmed:
+            callback()
+            return
+
+        # Need detection
+        self.start_detection_thread(callback)
 
     def start_grading_thread(self):
         if not self.rubric_path or not self.exam_folder:
@@ -535,6 +568,9 @@ class App(ctk.CTk):
             return
         self.save_current_config()
         
+        self.ensure_layout_and_run(self._run_grading_process)
+
+    def _run_grading_process(self):
         self.processing = True
         self.stop_event.clear()
         self.pause_event.set()
@@ -548,6 +584,71 @@ class App(ctk.CTk):
         self.session_completed_count = 0
         
         threading.Thread(target=self.process_images, daemon=True).start()
+
+    def start_detection_thread(self, callback):
+        self.btn_start.configure(state="disabled")
+        threading.Thread(target=self.run_detection, args=(callback,), daemon=True).start()
+
+    def run_detection(self, callback):
+        try:
+            # 1. Sample images
+            valid_extensions = ('.png', '.jpg', '.jpeg')
+            files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
+            
+            if not files:
+                self.after(0, lambda: messagebox.showerror("Error", "No images found!"))
+                self.after(0, lambda: self.reset_ui_state())
+                return
+                
+            import random
+            # Sample all files if total < 3, otherwise sample 3
+            sample_count = len(files) if len(files) < 3 else 3
+            sample_files = random.sample(files, sample_count)
+            
+            # 2. Detect concurrently
+            grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            
+            # Submit all detection tasks concurrently with 1 second stagger
+            futures = []
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=sample_count)
+            try:
+                for i, fname in enumerate(sample_files):
+                    # Log with filename
+                    self.after(0, lambda i=i, fn=fname, sc=sample_count: self.log(self.t("msg_detecting", current=i+1, total=sc) + f" - {fn}"))
+                    path = os.path.join(self.exam_folder, fname)
+                    future = executor.submit(grader.detect_regions, path)
+                    futures.append(future)
+                    # Stagger by 1 second between starts
+                    if i < len(sample_files) - 1:
+                        time.sleep(1)
+                
+                # Wait for all detections to complete
+                descriptions = []
+                for future in concurrent.futures.as_completed(futures):
+                    desc = future.result()
+                    descriptions.append(desc)
+            finally:
+                executor.shutdown(wait=True)
+            
+            # 3. Consolidate
+            self.after(0, lambda: self.log(self.t("msg_consolidating")))
+            final_layout = grader.consolidate_layout(descriptions)
+            
+            # 4. Show Confirmation (on main thread)
+            self.after(0, lambda: self.show_confirmation_dialog(final_layout, callback))
+            
+        except Exception as e:
+            self.after(0, lambda: self.log(self.t("msg_detect_failed", error=str(e))))
+            self.after(0, lambda: self.reset_ui_state())
+
+    def show_confirmation_dialog(self, layout_description, callback):
+        def on_confirm(new_desc):
+            self.layout_description = new_desc
+            self.template_confirmed = True
+            self.save_layout_config() # Save config
+            self.after(100, callback) # Run callback
+            
+        TemplateConfirmDialog(self, layout_description, on_confirm)
 
     def toggle_pause(self):
         if self.pause_event.is_set():
@@ -599,13 +700,15 @@ class App(ctk.CTk):
                         'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
         
         headers = list(final_data.keys())
+        # Only include priority fields that actually exist in data
+        priority_in_data = [h for h in priority if h in headers]
         remaining = [h for h in headers if h not in priority and h != ('Original File' if is_en else '原始文件')]
         
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
         
         remaining.sort(key=natural_sort_key)
-        sorted_headers = priority + remaining + [('Original File' if is_en else '原始文件')]
+        sorted_headers = priority_in_data + remaining + [('Original File' if is_en else '原始文件')]
 
         with self.write_lock:
             file_exists = os.path.isfile(csv_path)
@@ -625,8 +728,10 @@ class App(ctk.CTk):
                     if not file_exists:
                         writer.writeheader()
                     writer.writerow(final_data)
+                self.after(0, lambda fn=csv_filename: self.log(f"💾 Written to {fn}"))
             except Exception as e:
-                self.after(0, lambda: self.log(f"⚠️ Write CSV failed: {str(e)}"))
+                err = str(e)
+                self.after(0, lambda e=err: self.log(f"⚠️ Write CSV failed: {e}"))
 
     def generate_report_content(self, data, db_student_info):
         student_name = db_student_info.get('name', '未知')
@@ -761,7 +866,7 @@ class App(ctk.CTk):
                 if error_analysis:
                     md += f"  - **失分原因**: {error_analysis}\n"
 
-        return md, sub_scores_dict, consistency_note, matches
+        return md, sub_scores_dict, consistency_note, matches, obj_score_sum
 
     def save_markdown(self, data, original_filename, db_student_info):
         exam_room = db_student_info.get('room', '未知')
@@ -769,7 +874,8 @@ class App(ctk.CTk):
         filename_prefix = f"{exam_room}-{seat_no}"
         
         # Generate Content
-        md_content, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_student_info)
+        # Generate Content
+        md_content, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_student_info)
         
         reports_dir = os.path.join(self.exam_folder, "reports")
         if not os.path.exists(reports_dir):
@@ -797,11 +903,11 @@ class App(ctk.CTk):
             'OCR姓名': data.get('ocr_name', ''), 'OCR班级': data.get('ocr_class', ''),
             'OCR考场': data.get('ocr_room', ''), 'OCR座号': data.get('ocr_seat', ''),
             'OCR手写考号': data.get('ocr_id_written', ''), 'OCR填涂考号': data.get('ocr_id_filled', ''),
-            '信息校验': consistency_note
+            '信息一致性': consistency_note
         }
         summary_data.update(sub_scores_dict)
         
-        self.update_csv_summary(summary_data)
+        self.write_summary_csv(summary_data)
 
     def regrade_single_file(self, filename):
         """
@@ -824,7 +930,7 @@ class App(ctk.CTk):
             with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
             
             # 1. Process Image
-            result = self.grader_engine.grade_exam(rubric_text, image_path)
+            result = self.grader_engine.grade_exam(rubric_text, image_path, self.layout_description)
             
             if 'error' in result:
                 self.log(f"❌ Re-grading error: {result['error']}")
@@ -889,9 +995,21 @@ class App(ctk.CTk):
                 
             self.log(msg)
             
+            # Check if it's a fresh start (All files are missing reports/data)
+            # If so, do NOT prompt for targeted grading. User should click "Start Grading" to trigger detection.
+            if len(missing_set) == total:
+                self.log(self.t("msg_ready_start", count=total))
+                return
+            
             # Prompt to fix
             if messagebox.askyesno(self.t("msg_incomplete_title"), self.t("msg_incomplete_body", msg=msg)):
-                self.start_targeted_grading(list(missing_set))
+                
+                def start_fix_flow():
+                    # Re-verify to get the latest missing list (in case files were moved/deleted)
+                    self.log("🔄 Re-verifying missing files...")
+                    self.start_targeted_grading(None)
+
+                self.ensure_layout_and_run(start_fix_flow)
 
     def ensure_jsons_exist(self):
         """
@@ -944,9 +1062,11 @@ class App(ctk.CTk):
                 except: pass
 
     def start_targeted_grading(self, target_files):
-        if not target_files: return
+        # If target_files is None, it means we want to auto-detect missing files (Resume Mode)
+        # But we want to show "Targeted Grading" UI state.
         
-        self.log(self.t("msg_targeted_start", count=len(target_files)))
+        count_msg = len(target_files) if target_files else "ALL MISSING"
+        self.log(self.t("msg_targeted_start", count=count_msg))
         
         self.processing = True
         self.stop_event.clear()
@@ -960,7 +1080,75 @@ class App(ctk.CTk):
         self.start_time = time.time()
         self.session_completed_count = 0
         
+        # If target_files is None, process_images(None) will scan for pending files.
         threading.Thread(target=self.process_images, args=(target_files,), daemon=True).start()
+
+    def process_single_file(self, grader, rubric_text, filename, folder, is_retry, file_num=None):
+        # Check stop event before processing
+        if self.stop_event.is_set():
+            return False
+            
+        image_path = os.path.join(folder, filename)
+        
+        # Log which file we're processing (use provided file_num or calculate from counter)
+        if file_num is None:
+            with self.write_lock:
+                file_num = self.completed_count + 1
+        
+        self.after(0, lambda fn=filename, num=file_num: self.log(f"📝 [{num}/{self.total_files}] {fn}"))
+        
+        try:
+            # Check stop event again before actual grading
+            if self.stop_event.is_set():
+                return False
+                
+            # Pass layout_description if available
+            result = grader.grade_exam(rubric_text, image_path, self.layout_description)
+            
+            if 'error' in result:
+                err_msg = result['error']
+                self.after(0, lambda fn=filename, e=err_msg: self.log(f"❌ {fn}: {e}"))
+                if not is_retry:
+                    # Move to failed
+                    failed_dir = os.path.join(self.exam_folder, "failed")
+                    if not os.path.exists(failed_dir): os.makedirs(failed_dir)
+                    shutil.move(image_path, os.path.join(failed_dir, filename))
+                return False
+            
+            # Resolve Student Info
+            student_info, _ = self.student_manager.get_student_by_filename(filename)
+            
+            # Save Report
+            with self.write_lock:
+                self.save_markdown(result, filename, student_info)
+                
+                # Increment counters AFTER successful completion (within lock)
+                self.completed_count += 1
+                self.session_completed_count += 1
+            
+            # If this was a retry, move the file from failed back to main folder
+            if is_retry:
+                try:
+                    dest_main = os.path.join(self.exam_folder, filename)
+                    shutil.move(image_path, dest_main)
+                    self.after(0, lambda fn=filename: self.log(f"♻️ {fn} 已从失败文件夹移回"))
+                except Exception as e:
+                    self.after(0, lambda fn=filename: self.log(f"⚠️ 无法移动 {fn}: {str(e)}"))
+            
+            # Update UI and log (outside lock)
+            self.after(0, lambda: self.update_progress_ui())
+            self.after(0, lambda fn=filename: self.log(f"✅ {fn}"))
+            return True
+            
+        except Exception as e:
+            err_str = str(e)
+            self.after(0, lambda fn=filename, e=err_str: self.log(f"❌ {fn}: {e}"))
+            if not is_retry:
+                failed_dir = os.path.join(self.exam_folder, "failed")
+                if not os.path.exists(failed_dir): os.makedirs(failed_dir)
+                try: shutil.move(image_path, os.path.join(failed_dir, filename))
+                except: pass
+            return False
 
     def process_images(self, target_files=None):
         try:
@@ -968,8 +1156,8 @@ class App(ctk.CTk):
             grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
             valid_extensions = ('.png', '.jpg', '.jpeg')
             
+            # ===== PHASE 1: Main Folder Processing =====
             files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
-            self.total_files = len(files)
             
             pending_files = []
             
@@ -978,9 +1166,6 @@ class App(ctk.CTk):
                 failed_dir = os.path.join(self.exam_folder, "failed")
                 
                 for fname in target_files:
-                    # If in failed dir, move back to main first? 
-                    # Or just process from there? 
-                    # Better to move back to main so structure is clean.
                     src_failed = os.path.join(failed_dir, fname)
                     dest_main = os.path.join(self.exam_folder, fname)
                     
@@ -1005,44 +1190,112 @@ class App(ctk.CTk):
                     md_name = f"{exam_room}-{seat_no}.md"
                     md_path = os.path.join(self.exam_folder, "reports", md_name)
                     
-                    if os.path.exists(md_path):
-                        # Already done
-                        pass
-                    else:
+                    if not os.path.exists(md_path):
                         pending_files.append(f)
             
-            self.completed_count = self.total_files - len(pending_files)
+            # Check failed folder count
+            failed_dir = os.path.join(self.exam_folder, "failed")
+            failed_count = 0
+            if os.path.exists(failed_dir):
+                failed_count = len([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
+            
+            # Set total to PENDING files only
+            self.total_files = len(pending_files)
+            self.completed_count = 0
             self.after(0, lambda: self.update_progress_ui())
             
-            self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=len(pending_files))))
+            # Log start with failed count
+            if failed_count > 0:
+                self.after(0, lambda fc=failed_count: self.log(f"🚀 启动处理，共 {self.total_files} 张，失败文件夹中有 {fc} 张"))
+            else:
+                self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=self.total_files)))
             
+            # Process pending files
             if pending_files:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+                try:
                     futures = []
-                    for filename in pending_files:
-                        if self.stop_event.is_set(): break
-                        f = executor.submit(self.process_single_file, grader, rubric_text, filename, self.exam_folder, False)
+                    for idx, filename in enumerate(pending_files):
+                        if self.stop_event.is_set(): 
+                            break
+                        # Sequential numbering starting from 1
+                        file_num = idx + 1
+                        f = executor.submit(self.process_single_file, grader, rubric_text, filename, self.exam_folder, False, file_num)
                         futures.append(f)
-                        time.sleep(0.1) 
-                    concurrent.futures.wait(futures)
+                        time.sleep(1)  # Stagger requests by 1 second 
+                    
+                    # Wait for all futures to complete, but check stop_event periodically
+                    while futures:
+                        done, futures = concurrent.futures.wait(futures, timeout=0.5, return_when=concurrent.futures.FIRST_COMPLETED)
+                        if self.stop_event.is_set():
+                            # Cancel remaining futures
+                            for future in futures:
+                                future.cancel()
+                            break
+                finally:
+                    executor.shutdown(wait=True)  # Wait for all to complete
             
-            # Retry failed (Only in normal mode, or if requested?)
-            # In targeted mode, we just tried them. If they fail again, they go to failed.
+            # ===== PHASE 2: Retry Failed Files =====
             if not target_files and not self.stop_event.is_set():
                 failed_dir = os.path.join(self.exam_folder, "failed")
                 if os.path.exists(failed_dir):
                     failed_files = [f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)]
                     if failed_files:
-                        self.after(0, lambda: self.log(self.t("msg_retry", count=len(failed_files))))
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                            for filename in failed_files:
+                        # Update total_files for failed retry phase
+                        self.total_files = len(failed_files)
+                        self.completed_count = 0
+                        
+                        self.after(0, lambda fc=len(failed_files): self.log(f"🔄 正在重试 {fc} 个失败文件..."))
+                        
+                        executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+                        try:
+                            futures = []
+                            for idx, filename in enumerate(failed_files):
                                 if self.stop_event.is_set(): break
-                                executor.submit(self.process_single_file, grader, rubric_text, filename, failed_dir, True)
+                                file_num = idx + 1
+                                f = executor.submit(self.process_single_file, grader, rubric_text, filename, failed_dir, True, file_num)
+                                futures.append(f)
                                 time.sleep(1)
+                            
+                            # Wait for all retry futures
+                            while futures:
+                                done, futures = concurrent.futures.wait(futures, timeout=0.5, return_when=concurrent.futures.FIRST_COMPLETED)
+                                if self.stop_event.is_set():
+                                    for future in futures:
+                                        future.cancel()
+                                    break
+                        finally:
+                            executor.shutdown(wait=True)
 
-            # Final Cleanup: Regenerate CSV to ensure consistency
-            self.after(0, lambda: self.log("🔄 Regenerating Summary CSV..."))
-            self.regenerate_csv_from_jsons()
+            # ===== PHASE 3: Final Verification =====
+            if not self.stop_event.is_set():
+                # Wait a bit for any pending writes to complete
+                time.sleep(2)
+                
+                self.after(0, lambda: self.log("🔄 Regenerating Summary CSV..."))
+                self.regenerate_csv_from_jsons()
+                
+                # Final count verification
+                self.after(0, lambda: self.log("📊 Verifying final counts..."))
+                total_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+                
+                reports_dir = os.path.join(self.exam_folder, "reports")
+                if os.path.exists(reports_dir):
+                    json_count = len([f for f in os.listdir(reports_dir) if f.endswith('.json')])
+                    md_count = len([f for f in os.listdir(reports_dir) if f.endswith('.md')])
+                else:
+                    json_count = md_count = 0
+                
+                csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+                csv_rows = 0
+                if os.path.exists(csv_path):
+                    try:
+                        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                            csv_rows = sum(1 for line in f) - 1  # Exclude header
+                    except: pass
+                
+                self.after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows: 
+                    self.log(f"📊 答题卡: {ti}, JSON: {jc}, Markdown: {mc}, CSV: {cr}"))
 
             if self.stop_event.is_set():
                 self.after(0, lambda: self.log(self.t("msg_stopped")))
@@ -1054,7 +1307,7 @@ class App(ctk.CTk):
 
         except Exception as e:
             error_msg = str(e)
-            self.after(0, lambda: self.log(self.t("msg_error", error=error_msg)))
+            self.after(0, lambda e=error_msg: self.log(self.t("msg_error", error=e)))
         finally:
             self.processing = False
             self.after(0, lambda: self.reset_ui_state())
@@ -1081,7 +1334,7 @@ class App(ctk.CTk):
     def on_review_save(self, data):
         # 1. Regenerate Markdown
         db_info = data.get('db_student_info', {})
-        md_content, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+        md_content, sub_scores_dict, consistency_note, matches, _ = self.generate_report_content(data, db_info)
         
         exam_room = db_info.get('room', '未知')
         seat_no = db_info.get('seat', '未知')
@@ -1122,7 +1375,7 @@ class App(ctk.CTk):
                 db_info = data.get('db_student_info', {})
                 
                 # Re-calculate consistency/scores for summary
-                _, sub_scores_dict, consistency_note, matches = self.generate_report_content(data, db_info)
+                _, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
                 
                 # Determine Review Status
                 review_count = data.get('review_count', 0)
@@ -1147,7 +1400,8 @@ class App(ctk.CTk):
                     'OCR座号': data.get('ocr_seat', ''),
                     'OCR手写考号': data.get('ocr_id_written', ''),
                     'OCR填涂考号': data.get('ocr_id_filled', ''),
-                    '复审状态': review_status
+                    '复审状态': review_status,
+                    '客观题': obj_score_sum
                 }
                 summary.update(sub_scores_dict)
                 
@@ -1220,6 +1474,38 @@ class App(ctk.CTk):
         self.btn_start.configure(state="normal")
         self.btn_pause.configure(state="disabled", text=self.t("btn_pause"), fg_color="#D97706")
         self.btn_stop.configure(state="disabled")
+
+class TemplateConfirmDialog(ctk.CTkToplevel):
+    def __init__(self, parent, layout_description, on_confirm):
+        super().__init__(parent)
+        self.title(parent.t("title_confirm_layout"))
+        self.geometry("600x500")
+        self.on_confirm = on_confirm
+        
+        # Center window
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 300
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 250
+        self.geometry(f"+{x}+{y}")
+        
+        ctk.CTkLabel(self, text=parent.t("msg_confirm_layout"), font=("Arial", 14, "bold")).pack(pady=10, padx=20, anchor="w")
+        
+        self.textbox = ctk.CTkTextbox(self, font=("Arial", 12))
+        self.textbox.pack(fill="both", expand=True, padx=20, pady=10)
+        self.textbox.insert("1.0", layout_description)
+        
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=20)
+        
+        ctk.CTkButton(btn_frame, text=parent.t("btn_confirm_start"), fg_color="#106A38", width=200, command=self.confirm).pack()
+        
+        self.transient(parent)
+        self.grab_set()
+        
+    def confirm(self):
+        new_desc = self.textbox.get("1.0", "end-1c")
+        self.on_confirm(new_desc)
+        self.destroy()
 
 if __name__ == "__main__":
     app = App()
