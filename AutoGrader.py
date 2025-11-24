@@ -1040,14 +1040,14 @@ class App(ctk.CTk):
         
         self.write_summary_csv(summary_data)
 
-    def regrade_single_file(self, filename):
+    def regrade_single_file(self, image_path):
         """
         Re-grades a single image file.
         1. Calls GraderEngine to process the image.
         2. Saves the new Report (MD & JSON) and updates CSV.
         3. Returns the new data.
         """
-        self.log(f"🔄 Re-grading {filename}...")
+        self.log(f"🔄 Re-grading {os.path.basename(image_path)}...")
         
         # Ensure grader engine exists
         if not hasattr(self, 'grader_engine') or self.grader_engine is None:
