@@ -815,7 +815,8 @@ class App(ctk.CTk):
             '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
-            '原始文件': 'Original File', '客观题': 'Objective Score'
+            '原始文件': 'Original File', '客观题': 'Objective Score',
+            '客观题正确数': 'Objective Correct', '客观题总数': 'Objective Total'
         }
         
         # Translate data_dict keys if EN
@@ -829,10 +830,12 @@ class App(ctk.CTk):
 
         # Dynamic headers based on final_data keys
         if is_en:
-            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Objective Score', 'Total Score', 
+            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Total Score',
+                        'Objective Score', 'Objective Correct', 'Objective Total',
                         'OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
         else:
-            priority = ['考场', '座号', '班级', '姓名', '考号', '客观题', '总分', 
+            priority = ['考场', '座号', '班级', '姓名', '考号', '总分',
+                        '客观题', '客观题正确数', '客观题总数',
                         'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
         
         headers = list(final_data.keys())
@@ -1036,9 +1039,12 @@ class App(ctk.CTk):
             '姓名': db_student_info.get('name', '未知'), '考号': db_student_info.get('id', '未知'),
             '总分': data.get('total_score', 0),
             '客观题': obj_score_sum,
+            '客观题正确数': obj_correct_count,
+            '客观题总数': obj_total_count,
             'OCR姓名': data.get('ocr_name', ''), 'OCR班级': data.get('ocr_class', ''),
             'OCR考场': data.get('ocr_room', ''), 'OCR座号': data.get('ocr_seat', ''),
             'OCR手写考号': data.get('ocr_id_written', ''), 'OCR填涂考号': data.get('ocr_id_filled', ''),
+            '原始文件': original_filename,
             '信息一致性': consistency_note
         }
         summary_data.update(sub_scores_dict)

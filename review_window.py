@@ -1032,6 +1032,7 @@ class ReviewWindow(ctk.CTkToplevel):
         seat = str(self.current_data.get('db_student_info', {}).get('seat', '未知'))
         json_name = f"{room}-{seat}.json"
         json_path = os.path.join(self.reports_dir, json_name)
+        md_path = os.path.join(self.reports_dir, f"{room}-{seat}.md")
         
         # Increment Review Count
         current_count = self.current_data.get('review_count', 0)
@@ -1042,10 +1043,108 @@ class ReviewWindow(ctk.CTkToplevel):
                 json.dump(self.current_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"Error saving JSON: {e}")
+        
+        # 2. Regenerate Markdown file
+        self.update_markdown_file(md_path)
+        
+        # 3. Update CSV row directly
+        self.update_csv_row()
             
-        # 2. Update CSV (via callback)
-        if self.on_save_callback:
-            self.on_save_callback(self.current_data)
+    def update_markdown_file(self, md_path):
+        """Regenerate markdown file from current data"""
+        if not self.current_data: return
+        
+        try:
+            # Use parent's generate_report_content if available
+            if hasattr(self.parent_app, 'generate_report_content'):
+                db_info = self.current_data.get('db_student_info', {})
+                md_content, _, _, _, _ = self.parent_app.generate_report_content(self.current_data, db_info)
+                
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(md_content)
+        except Exception as e:
+            print(f"Error updating markdown: {e}")
+    
+    def update_csv_row(self):
+        """Update specific row in CSV file"""
+        import csv
+        
+        try:
+            # Determine CSV filename based on language
+            is_en = (self.parent_app.current_lang == "EN") if hasattr(self.parent_app, 'current_lang') else False
+            csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
+            csv_path = os.path.join(os.path.dirname(self.reports_dir), csv_filename)
+            
+            if not os.path.exists(csv_path):
+                # If CSV doesn't exist, use callback to generate it
+                if self.on_save_callback:
+                    self.on_save_callback(self.current_data)
+                return
+            
+            # Read existing CSV
+            rows = []
+            headers = []
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                headers = reader.fieldnames
+                rows = list(reader)
+            
+            # Find row to update
+            db_info = self.current_data.get('db_student_info', {})
+            room = str(db_info.get('room', ''))
+            seat = str(db_info.get('seat', ''))
+            
+            room_key = 'Room' if is_en else '考场'
+            seat_key = 'Seat' if is_en else '座号'
+            total_key = 'Total Score' if is_en else '总分'
+            obj_score_key = 'Objective Score' if is_en else '客观题'
+            obj_correct_key = 'Objective Correct' if is_en else '客观题正确数'
+            obj_total_key = 'Objective Total' if is_en else '客观题总数'
+            
+            row_found = False
+            for row in rows:
+                if str(row.get(room_key, '')) == room and str(row.get(seat_key, '')) == seat:
+                    # Update scores
+                    row[total_key] = str(self.current_data.get('total_score', 0))
+                    
+                    # Calculate objective stats
+                    details = self.current_data.get('details', [])
+                    obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                    if obj_items:
+                        obj_score = sum(x.get('score', 0) for x in obj_items)
+                        obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
+                        obj_total = len(obj_items)
+                    else:
+                        obj_score = self.current_data.get('legacy_obj_score', 0)
+                        obj_correct = int(obj_score / 3) if obj_score > 0 else 0
+                        obj_total = 16  # Default assumption
+                    
+                    row[obj_score_key] = str(obj_score)
+                    row[obj_correct_key] = str(obj_correct)
+                    row[obj_total_key] = str(obj_total)
+                    
+                    # Update subjective question scores
+                    for item in details:
+                        if "客观" not in item.get('type', '') and "选择" not in item.get('type', ''):
+                            q_id = item.get('question_id', '')
+                            if q_id in headers:
+                                row[q_id] = str(item.get('score', 0))
+                    
+                    row_found = True
+                    break
+            
+            # Write back to CSV
+            if row_found:
+                with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.DictWriter(f, fieldnames=headers)
+                    writer.writeheader()
+                    writer.writerows(rows)
+        except Exception as e:
+            print(f"Error updating CSV: {e}")
+            # Fallback to callback
+            if self.on_save_callback:
+                self.on_save_callback(self.current_data)
+
 
     def save_progress_to_file(self):
         try:

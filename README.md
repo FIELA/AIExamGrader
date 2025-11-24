@@ -115,6 +115,29 @@ The executable folder will be generated in the `dist/` folder.
 -   **Exam Folder**: A folder containing images of student exam papers (supported formats: .jpg, .png, .jpeg)
 -   **Student List**: (Optional) An Excel/CSV file containing student roster for validation
 
+#### 📝 Image File Naming Requirements
+
+**Required Format**: `考场号-座号.扩展名`
+
+**Examples**:
+-   `01-15.jpg` → Room 1, Seat 15
+-   `02-08.png` → Room 2, Seat 8
+-   `03-22.jpeg` → Room 3, Seat 22
+
+**Absence Marker** (Optional):
+-   Add `缺` after the seat number for absent students
+-   Example: `01-05缺.jpg` → Room 1, Seat 5, Absent
+
+**Important Notes**:
+-   The `-` separator is **required** to distinguish room and seat numbers
+-   File extensions are **case-insensitive** (.jpg, .JPG, .Jpg all work)
+-   Room and seat numbers should match your student list for accurate identification
+-   If filenames don't follow this format:
+    -   ✅ AI grading will still work
+    -   ❌ Student information will show as "Unknown"
+    -   ❌ Results cannot be matched to your student roster
+    -   ❌ Manual review and searching will be difficult
+
 ### 3. Start Grading
 -   Click **▶️ Start Grading**
 -   The system will:
