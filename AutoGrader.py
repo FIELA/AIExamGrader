@@ -89,7 +89,7 @@ class App(ctk.CTk):
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="AI Exam Grader", font=ctk.CTkFont(size=28, weight="bold"))
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=self.t("logo"), font=ctk.CTkFont(size=28, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=16, pady=(24, 16))
 
         # Language Selector
