@@ -99,7 +99,7 @@ class App(ctk.CTk):
         self.combo_lang.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         # ===== Configuration Profile Section =====
-        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text="Config Profile:", anchor="w")
+        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_config_profile"), anchor="w")
         self.lbl_config_profile.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
         
         self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.get_profile_list(), command=self.on_profile_select)
@@ -111,19 +111,19 @@ class App(ctk.CTk):
         self.profile_btn_frame.grid_columnconfigure(0, weight=1)
         self.profile_btn_frame.grid_columnconfigure(1, weight=1)
         
-        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text="💾 Save", command=self.save_current_profile, width=60, height=28)
+        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_save_profile"), command=self.save_current_profile, width=60, height=28)
         self.btn_save_profile.grid(row=0, column=0, padx=(0, 5), sticky="ew")
         
-        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text="🗑️ Delete", command=self.delete_current_profile, width=60, height=28, fg_color="darkred")
+        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=28, fg_color="darkred")
         self.btn_delete_profile.grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
         # API Config
-        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text="API Key:", anchor="w")
+        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w")
         self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
         self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...")
         self.entry_key.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
 
-        self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text="Base URL (Optional):", anchor="w")
+        self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w")
         self.lbl_base.grid(row=8, column=0, padx=20, pady=(10, 0), sticky="w")
         self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...")
         self.entry_base.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
@@ -195,17 +195,17 @@ class App(ctk.CTk):
         self.btn_stop = ctk.CTkButton(self.controls_card, text="⏹️ Stop", fg_color="#DC2626", text_color="white", height=50, font=("Arial", 16, "bold"), state="disabled", command=self.stop_grading)
         self.btn_stop.pack(side="left", padx=10, pady=20, expand=True, fill="x")
 
-        self.btn_review = ctk.CTkButton(self.controls_card, text="🔍 Review", fg_color="#4B5563", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.open_review_window)
+        self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), fg_color="#4B5563", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.open_review_window)
         self.btn_review.pack(side="left", padx=10, pady=20, expand=True, fill="x")
 
         # Stats
         self.stats_card = ctk.CTkFrame(self.dashboard_frame)
         self.stats_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
-        self.lbl_progress = ctk.CTkLabel(self.stats_card, text="Progress: 0 / 0", font=("Arial", 16, "bold"))
+        self.lbl_progress = ctk.CTkLabel(self.stats_card, text=self.t("lbl_progress", completed=0, total=0), font=("Arial", 16, "bold"))
         self.lbl_progress.pack(pady=(15, 5))
         
-        self.lbl_etr = ctk.CTkLabel(self.stats_card, text="ETR: --:--", font=("Arial", 14), text_color=("gray40", "gray60"))
+        self.lbl_etr = ctk.CTkLabel(self.stats_card, text=self.t("lbl_etr", time="--:--"), font=("Arial", 14), text_color=("gray40", "gray60"))
         self.lbl_etr.pack(pady=(0, 15))
 
         # 3. Progress Bar
@@ -239,7 +239,7 @@ class App(ctk.CTk):
             if profile_data:
                 self.apply_profile(profile_data)
                 self.combo_profile.set(last_profile)
-                self.log(f"🔄 Auto-loaded profile: {last_profile}")
+                self.log(self.t("log_auto_loaded", profile=last_profile))
         
         self.log(self.t("msg_config_loaded"))
 
@@ -262,7 +262,7 @@ class App(ctk.CTk):
         profile_data = self.config_manager.load_profile(profile_name)
         if profile_data:
             self.apply_profile(profile_data)
-            self.log(f"✅ Loaded profile: {profile_name}")
+            self.log(self.t("log_loaded_profile", profile=profile_name))
     
     def save_current_profile(self):
         """Save current configuration as a profile"""
@@ -292,18 +292,18 @@ class App(ctk.CTk):
         self.combo_profile.configure(values=self.get_profile_list())
         self.combo_profile.set(profile_name)
         
-        self.log(f"💾 Saved profile: {profile_name}")
+        self.log(self.t("log_saved_profile", profile=profile_name))
     
     def delete_current_profile(self):
         """Delete currently selected profile"""
         profile_name = self.combo_profile.get()
         
-        if profile_name == "<No Profiles>":
-            messagebox.showwarning("Warning", "No profile selected to delete")
+        if not profile_name:
+            messagebox.showwarning(self.t("title_warning"), self.t("msg_no_profile_delete"))
             return
         
         # Confirm deletion
-        if messagebox.askyesno("Confirm Delete", f"Delete profile '{profile_name}'?"):
+        if messagebox.askyesno(self.t("title_confirm_delete"), self.t("msg_confirm_delete", profile=profile_name)):
             self.config_manager.delete_profile(profile_name)
             
             # Update dropdown
@@ -312,7 +312,7 @@ class App(ctk.CTk):
             if profiles:
                 self.combo_profile.set(profiles[0])
             
-            self.log(f"🗑️ Deleted profile: {profile_name}")
+            self.log(self.t("log_deleted_profile", profile=profile_name))
     
     def apply_profile(self, profile_data):
         """Apply a profile's configuration to the UI"""
@@ -368,6 +368,10 @@ class App(ctk.CTk):
         self.logo_label.configure(text=self.t("logo"))
         
         self.lbl_lang.configure(text=self.t("lbl_language"))
+        self.lbl_config_profile.configure(text=self.t("lbl_config_profile"))
+        self.btn_save_profile.configure(text=self.t("btn_save_profile"))
+        self.btn_delete_profile.configure(text=self.t("btn_delete_profile"))
+        
         self.lbl_key.configure(text=self.t("lbl_key"))
         self.lbl_base.configure(text=self.t("lbl_base"))
         self.lbl_provider.configure(text=self.t("lbl_provider"))
@@ -392,6 +396,7 @@ class App(ctk.CTk):
         else:
             self.btn_pause.configure(text=self.t("btn_resume"))
         self.btn_stop.configure(text=self.t("btn_stop"))
+        self.btn_review.configure(text=self.t("btn_review"))
         
         self.update_progress_ui() # Update progress text
 
@@ -407,7 +412,7 @@ class App(ctk.CTk):
     def check_models(self):
         api_key = self.entry_key.get()
         if not api_key:
-            messagebox.showerror("Error", self.t("msg_enter_key"))
+            messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
         self.btn_check_model.configure(state="disabled", text=self.t("checking"))
         def run_check():
@@ -417,7 +422,7 @@ class App(ctk.CTk):
                 self.after(0, lambda: self.update_model_list(models))
             except Exception as e:
                 err = str(e)
-                self.after(0, lambda: messagebox.showerror("Check Failed", err))
+                self.after(0, lambda: messagebox.showerror(self.t("title_check_failed"), err))
             finally:
                 self.after(0, lambda: self.btn_check_model.configure(state="normal", text=self.t("btn_check_model")))
         threading.Thread(target=run_check, daemon=True).start()
@@ -426,7 +431,7 @@ class App(ctk.CTk):
         if not models: return
         self.combo_model.configure(values=models)
         self.combo_model.set(models[0])
-        messagebox.showinfo("Success", self.t("check_success", count=len(models)))
+        messagebox.showinfo(self.t("title_success"), self.t("check_success", count=len(models)))
 
     def log(self, message):
         current_time = datetime.datetime.now().strftime("%H:%M:%S")
@@ -490,7 +495,7 @@ class App(ctk.CTk):
 
         if total_images == 0: return
 
-        self.log(f"🔍 Starting detailed verification for {total_images} files...")
+        self.log(self.t("log_verifying", total=total_images))
 
         # 2. Load CSV Data for quick lookup
         csv_data = set() # Stores (Room, Seat) tuples
@@ -514,7 +519,7 @@ class App(ctk.CTk):
                         s = (row.get('座号') or row.get('Seat') or '').strip()
                         if r and s: csv_data.add((r, s))
             except Exception as e:
-                self.log(f"⚠️ Failed to read CSV: {e}")
+                self.log(self.t("log_failed_csv", error=e))
 
         # 3. Verify 1-to-1
         missing_reports = []
@@ -531,7 +536,7 @@ class App(ctk.CTk):
             for filename in images:
                 checked_count += 1
                 if checked_count % 50 == 0:
-                    self.after(0, lambda c=checked_count: self.log(f"🔍 Verified {c}/{total_images}..."))
+                    self.after(0, lambda c=checked_count: self.log(self.t("log_verified_progress", current=c, total=total_images)))
 
                 # Get Student Info
                 student_info, _ = self.student_manager.get_student_by_filename(filename)
@@ -657,7 +662,7 @@ class App(ctk.CTk):
                         self.template_confirmed = True
                         self.log("📄 Loaded saved layout configuration.")
             except Exception as e:
-                self.log(f"⚠️ Failed to load layout config: {e}")
+                self.log(self.t("log_failed_layout_load", error=e))
 
     def save_layout_config(self):
         if not self.exam_folder or not self.layout_description: return
@@ -666,7 +671,7 @@ class App(ctk.CTk):
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump({"layout_description": self.layout_description}, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            self.log(f"⚠️ Failed to save layout config: {e}")
+            self.log(self.t("log_failed_layout_save", error=e))
 
     def ensure_layout_and_run(self, callback):
         """
@@ -692,10 +697,10 @@ class App(ctk.CTk):
 
     def start_grading_thread(self):
         if not self.rubric_path or not self.exam_folder:
-            messagebox.showerror("Error", self.t("msg_select_files"))
+            messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
             return
         if not self.entry_key.get():
-            messagebox.showerror("Error", self.t("msg_enter_key"))
+            messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
         self.save_current_config()
         
@@ -726,8 +731,8 @@ class App(ctk.CTk):
             valid_extensions = ('.png', '.jpg', '.jpeg')
             files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
             
-            if not files:
-                self.after(0, lambda: messagebox.showerror("Error", "No images found!"))
+            if not files: # Changed from self.image_files to files as per original context
+                self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_no_images")))
                 self.after(0, lambda: self.reset_ui_state())
                 return
                 
@@ -792,7 +797,7 @@ class App(ctk.CTk):
             self.log(self.t("msg_resumed"))
 
     def stop_grading(self):
-        if messagebox.askyesno("Confirm", self.t("msg_confirm_stop")):
+        if messagebox.askyesno(self.t("title_confirm"), self.t("msg_confirm_stop")):
             self.stop_event.set()
             self.pause_event.set() # Ensure threads can wake up to exit
             self.log(self.t("msg_stopping"))
@@ -859,10 +864,10 @@ class App(ctk.CTk):
                     if not file_exists:
                         writer.writeheader()
                     writer.writerow(final_data)
-                self.after(0, lambda fn=csv_filename: self.log(f"💾 Written to {fn}"))
+                self.after(0, lambda fn=csv_filename: self.log(self.t("log_csv_written", filename=fn)))
             except Exception as e:
                 err = str(e)
-                self.after(0, lambda e=err: self.log(f"⚠️ Write CSV failed: {e}"))
+                self.after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
 
     def generate_report_content(self, data, db_student_info):
         student_name = db_student_info.get('name', '未知')
@@ -1047,14 +1052,14 @@ class App(ctk.CTk):
         2. Saves the new Report (MD & JSON) and updates CSV.
         3. Returns the new data.
         """
-        self.log(f"🔄 Re-grading {os.path.basename(image_path)}...")
+        self.log(self.t("log_regrading", filename=os.path.basename(image_path)))
         
         # Ensure grader engine exists
         if not hasattr(self, 'grader_engine') or self.grader_engine is None:
             try:
                 self.grader_engine = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
             except Exception as e:
-                self.log(f"❌ Failed to initialize Grader Engine: {e}")
+                self.log(self.t("log_engine_init_failed", error=e))
                 return False, str(e)
 
         try:
@@ -1064,7 +1069,7 @@ class App(ctk.CTk):
             result = self.grader_engine.grade_exam(rubric_text, image_path, self.layout_description)
             
             if 'error' in result:
-                self.log(f"❌ Re-grading error: {result['error']}")
+                self.log(self.t("log_regrade_error", error=result['error']))
                 return False, result['error']
                 
             # 2. Resolve Student Info
@@ -1074,7 +1079,7 @@ class App(ctk.CTk):
             # 3. Save Report (Overwrites existing)
             self.save_markdown(result, filename, student_info)
             
-            self.log(f"✅ Re-grading complete for {filename}")
+            self.log(self.t("log_regrade_complete", filename=filename))
             
             # Return success
             return True, "Success"
@@ -1099,6 +1104,8 @@ class App(ctk.CTk):
                 self.lbl_etr.configure(text=self.t("lbl_etr", time=etr_str))
             else:
                 self.lbl_etr.configure(text=self.t("lbl_etr", time=self.t("etr_zero")))
+        else:
+            self.lbl_etr.configure(text=self.t("lbl_etr", time="--:--"))
 
     def handle_verification_result(self, total, missing_reports, missing_csv, missing_jsons, failed_files):
         if not missing_reports and not missing_csv and not missing_jsons and not failed_files:
@@ -1226,7 +1233,7 @@ class App(ctk.CTk):
             with self.write_lock:
                 file_num = self.completed_count + 1
         
-        self.after(0, lambda fn=filename, num=file_num: self.log(f"📝 [{num}/{self.total_files}] {fn}"))
+        self.after(0, lambda fn=filename, num=file_num: self.log(self.t("log_processing_progress", current=num, total=self.total_files, filename=fn)))
         
         try:
             # Check stop event again before actual grading
@@ -1238,7 +1245,7 @@ class App(ctk.CTk):
             
             if 'error' in result:
                 err_msg = result['error']
-                self.after(0, lambda fn=filename, e=err_msg: self.log(f"❌ {fn}: {e}"))
+                self.after(0, lambda fn=filename, e=err_msg: self.log(self.t("log_processing_error", filename=fn, error=e)))
                 if not is_retry:
                     # Move to failed
                     failed_dir = os.path.join(self.exam_folder, "failed")
@@ -1262,18 +1269,18 @@ class App(ctk.CTk):
                 try:
                     dest_main = os.path.join(self.exam_folder, filename)
                     shutil.move(image_path, dest_main)
-                    self.after(0, lambda fn=filename: self.log(f"♻️ {fn} 已从失败文件夹移回"))
+                    self.after(0, lambda fn=filename: self.log(self.t("log_moved_back", filename=fn)))
                 except Exception as e:
-                    self.after(0, lambda fn=filename: self.log(f"⚠️ 无法移动 {fn}: {str(e)}"))
+                    self.after(0, lambda fn=filename: self.log(self.t("log_move_failed", filename=fn, error=str(e))))
             
             # Update UI and log (outside lock)
             self.after(0, lambda: self.update_progress_ui())
-            self.after(0, lambda fn=filename: self.log(f"✅ {fn}"))
+            self.after(0, lambda fn=filename: self.log(self.t("log_file_done", filename=fn)))
             return True
             
         except Exception as e:
             err_str = str(e)
-            self.after(0, lambda fn=filename, e=err_str: self.log(f"❌ {fn}: {e}"))
+            self.after(0, lambda fn=filename, e=err_str: self.log(self.t("log_processing_error", filename=fn, error=e)))
             if not is_retry:
                 failed_dir = os.path.join(self.exam_folder, "failed")
                 if not os.path.exists(failed_dir): os.makedirs(failed_dir)
@@ -1337,7 +1344,7 @@ class App(ctk.CTk):
             
             # Log start with failed count
             if failed_count > 0:
-                self.after(0, lambda fc=failed_count: self.log(f"🚀 启动处理，共 {self.total_files} 张，失败文件夹中有 {fc} 张"))
+                self.after(0, lambda fc=failed_count: self.log(self.t("log_start_failed_count", total=self.total_files, failed=fc)))
             else:
                 self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=self.total_files)))
             
@@ -1376,7 +1383,7 @@ class App(ctk.CTk):
                         self.total_files = len(failed_files)
                         self.completed_count = 0
                         
-                        self.after(0, lambda fc=len(failed_files): self.log(f"🔄 正在重试 {fc} 个失败文件..."))
+                        self.after(0, lambda fc=len(failed_files): self.log(self.t("log_retry_failed", count=fc)))
                         
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
                         try:
@@ -1426,7 +1433,7 @@ class App(ctk.CTk):
                     except: pass
                 
                 self.after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows: 
-                    self.log(f"📊 答题卡: {ti}, JSON: {jc}, Markdown: {mc}, CSV: {cr}"))
+                    self.log(self.t("log_grading_stats", ti=ti, jc=jc, mc=mc, cr=cr)))
 
             if self.stop_event.is_set():
                 self.after(0, lambda: self.log(self.t("msg_stopped")))
@@ -1445,7 +1452,7 @@ class App(ctk.CTk):
 
     def open_review_window(self):
         if not self.exam_folder:
-            messagebox.showerror("Error", self.t("msg_select_files"))
+            messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
             return
             
         # Ensure JSONs exist (Legacy Support)
