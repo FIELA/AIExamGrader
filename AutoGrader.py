@@ -1029,10 +1029,18 @@ class App(ctk.CTk):
         json_path = os.path.join(reports_dir, f"{filename_prefix}.json")
         # Add metadata to JSON for easier loading
         data_to_save = data.copy()
-        data_to_save['original_filename'] = original_filename
-        data_to_save['db_student_info'] = db_student_info
-        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+            
+        # Calculate objective question statistics
+        details = data.get('details', [])
+        objective_q = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+        if objective_q:
+            obj_correct_count = len([x for x in objective_q if x.get('score', 0) > 0])
+            obj_total_count = len(objective_q)
+        else:
+            # Fallback for legacy data
+            obj_correct_count = int(obj_score_sum / 3) if obj_score_sum > 0 else 0
+            obj_total_count = 16  # Default assumption
             
         summary_data = {
             '考场': exam_room, '座号': seat_no, '班级': db_student_info.get('class', '未知'), 
