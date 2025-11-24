@@ -1,7 +1,7 @@
 TRANSLATIONS = {
     "CN": {
-        "app_title": "Mac AI 智能阅卷助手 (Pro)",
-        "logo": "AI 智能阅卷",
+        "app_title": "AI 智能阅卷助手",
+        "logo": "AI 智能阅卷助手",
         "lbl_key": "API Key:",
         "lbl_base": "Base URL (选填):",
         "lbl_provider": "服务提供商:",
@@ -173,7 +173,7 @@ TRANSLATIONS = {
         "msg_regrade_unavailable": "重新阅卷功能不可用。"
     },
     "EN": {
-        "app_title": "Mac AI Exam Grader (Pro)",
+        "app_title": "AI Exam Grader",
         "logo": "AI Exam Grader",
         "lbl_key": "API Key:",
         "lbl_base": "Base URL (Optional):",
