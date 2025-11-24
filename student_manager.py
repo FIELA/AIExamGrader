@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Tuple
 class StudentManager:
     def __init__(self):
         self.students: List[Dict[str, str]] = []
+        self.student_path: str = ""
 
     def load_from_file(self, path: str) -> int:
         """
@@ -16,6 +17,7 @@ class StudentManager:
         Returns the number of students loaded.
         """
         self.students = []
+        self.student_path = path
         rows = []
         
         try:
