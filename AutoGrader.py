@@ -346,7 +346,7 @@ class App(ctk.CTk):
         if "student_list" in profile_data and profile_data["student_list"]:
             student_path = profile_data["student_list"]
             if os.path.exists(student_path):
-                count = self.student_manager.load_students(student_path)
+                count = self.student_manager.load_from_file(student_path)
                 if count > 0:
                     self.lbl_list_status.configure(text=f"{count} students", text_color=("green", "lightgreen"))
 
