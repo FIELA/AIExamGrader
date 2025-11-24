@@ -1,4 +1,4 @@
-# AI Exam Grader (Pro) - 智能阅卷助手
+# AI Exam Grader - 智能阅卷助手
 
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
