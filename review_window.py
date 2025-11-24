@@ -80,6 +80,8 @@ class ReviewWindow(ctk.CTkToplevel):
         self.view_mode = 'image'
         self.sub_entries = {}
         
+        self.last_confirm_time = 0 # For debounce
+        
         self.load_file_list()
         self.setup_ui()
         
@@ -108,10 +110,10 @@ class ReviewWindow(ctk.CTkToplevel):
         
         if self.image_files:
             self.load_current_student()
-        else:
-            messagebox.showinfo("Info", self.t("msg_no_images"))
+        if not self.image_files:
+            messagebox.showinfo(self.t("title_success"), self.t("msg_no_images"))
             self.destroy()
-            
+            return
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def t(self, key, **kwargs):
@@ -149,11 +151,22 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=100, command=self.prev_step, fg_color="gray")
         self.btn_back.pack(side="left", padx=5, pady=10)
         
+        # Search
+        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=150)
+        self.entry_search.pack(side="left", padx=10)
+        self.entry_search.bind("<Return>", lambda e: self.search_student())
+        
         self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
-        self.lbl_counter.pack(side="left", expand=True)
+        self.lbl_counter.pack(side="left", padx=20)
+        
+        self.lbl_status = ctk.CTkLabel(self.action_frame, text=self.t("lbl_status", status="--"), font=("Arial", 14, "bold"))
+        self.lbl_status.pack(side="left", padx=20)
         
         self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_text_mode"), width=100, command=self.toggle_view_mode, fg_color="#0F766E")
         self.btn_mode.pack(side="right", padx=5)
+        
+        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=100, command=self.skip_student, fg_color="#D97706") # Amber
+        self.btn_next_image.pack(side="right", padx=5, pady=10)
 
         # --- Global Layout: Main Content (Top) ---
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -185,22 +198,22 @@ class ReviewWindow(ctk.CTkToplevel):
         self.zoom_toolbar = ctk.CTkFrame(self.image_frame, height=40, fg_color="gray20")
         self.zoom_toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
         
-        self.btn_zoom_out = ctk.CTkButton(self.zoom_toolbar, text="➖", width=40, command=self.zoom_out)
+        self.btn_zoom_out = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_zoom_out"), width=40, command=self.zoom_out)
         self.btn_zoom_out.pack(side="left", padx=5, pady=5)
         
-        self.lbl_zoom = ctk.CTkLabel(self.zoom_toolbar, text="100%", width=60)
+        self.lbl_zoom = ctk.CTkLabel(self.zoom_toolbar, text=self.t("lbl_zoom", scale=100), width=60)
         self.lbl_zoom.pack(side="left", padx=5)
         
-        self.btn_zoom_in = ctk.CTkButton(self.zoom_toolbar, text="➕", width=40, command=self.zoom_in)
+        self.btn_zoom_in = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_zoom_in"), width=40, command=self.zoom_in)
         self.btn_zoom_in.pack(side="left", padx=5, pady=5)
         
-        self.btn_reset = ctk.CTkButton(self.zoom_toolbar, text="↺ Reset", width=80, command=self.reset_zoom)
+        self.btn_reset = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_reset_zoom"), width=80, command=self.reset_zoom)
         self.btn_reset.pack(side="left", padx=10, pady=5)
         
-        self.btn_left = ctk.CTkButton(self.zoom_toolbar, text="⬅ Left", width=80, command=self.scroll_to_left)
+        self.btn_left = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_left"), width=80, command=self.scroll_to_left)
         self.btn_left.pack(side="left", padx=5, pady=5)
         
-        self.btn_right = ctk.CTkButton(self.zoom_toolbar, text="➡ Right", width=80, command=self.scroll_to_right)
+        self.btn_right = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_right"), width=80, command=self.scroll_to_right)
         self.btn_right.pack(side="left", padx=5, pady=5)
         
         # Bindings
@@ -239,11 +252,22 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=100, command=self.prev_student, fg_color="gray")
         self.btn_back.pack(side="left", padx=5, pady=10)
         
+        # Search
+        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=150)
+        self.entry_search.pack(side="left", padx=10)
+        self.entry_search.bind("<Return>", lambda e: self.search_student())
+        
         self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
-        self.lbl_counter.pack(side="left", expand=True)
+        self.lbl_counter.pack(side="left", padx=20)
+        
+        self.lbl_status = ctk.CTkLabel(self.action_frame, text=self.t("lbl_status", status="--"), font=("Arial", 14, "bold"))
+        self.lbl_status.pack(side="left", padx=20)
         
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=150, command=self.confirm_all_and_next, fg_color="#106A38")
         self.btn_confirm_all.pack(side="right", padx=20, pady=10)
+        
+        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=100, command=self.skip_student, fg_color="#D97706")
+        self.btn_next_image.pack(side="right", padx=5, pady=10)
         
         self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_image_mode"), width=100, command=self.toggle_view_mode, fg_color="#0F766E")
         self.btn_mode.pack(side="right", padx=5)
@@ -273,7 +297,7 @@ class ReviewWindow(ctk.CTkToplevel):
         self.right_panel = ctk.CTkFrame(self.main_frame)
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         
-        self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text="Subjective Review")
+        self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text=self.t("lbl_review_details"))
         self.subj_scroll.pack(fill="both", expand=True, padx=5, pady=5)
 
     # --- Navigation Methods ---
@@ -282,7 +306,7 @@ class ReviewWindow(ctk.CTkToplevel):
             self.current_index += 1
             self.load_current_student()
         else:
-            messagebox.showinfo("Done", self.t("msg_all_reviewed"))
+            messagebox.showinfo(self.t("title_success"), self.t("msg_all_reviewed"))
             self.destroy()
             
     def prev_student(self):
@@ -290,7 +314,68 @@ class ReviewWindow(ctk.CTkToplevel):
             self.current_index -= 1
             self.load_current_student()
         else:
-            messagebox.showinfo("Info", self.t("msg_first_student"))
+            messagebox.showinfo(self.t("title_success"), self.t("msg_first_student"))
+
+    def skip_student(self):
+        """Skip current student without saving"""
+        if self.current_index < len(self.image_files) - 1:
+            self.current_index += 1
+            self.load_current_student()
+        else:
+            messagebox.showinfo("Done", self.t("msg_all_reviewed"))
+            self.destroy()
+
+    def search_student(self):
+        query = self.entry_search.get().strip().lower()
+        if not query: return
+        
+        found_index = -1
+        
+        for idx, filename in enumerate(self.image_files):
+            # We need to peek at student info without fully loading if possible, 
+            # or just use the student_manager which should have it cached.
+            student_info, _ = self.student_manager.get_student_by_filename(filename)
+            
+            name = str(student_info.get('name', '')).lower()
+            sid = str(student_info.get('id', '')).lower()
+            if sid.endswith('.0'): sid = sid[:-2] # Handle float conversion artifacts
+            
+            room = str(student_info.get('room', ''))
+            seat = str(student_info.get('seat', ''))
+            
+            # Check matches
+            if query in name or query in sid:
+                found_index = idx
+                break
+            
+            # Check Room-Seat exact match (e.g. "01-05") or loose match ("1-5")
+            if "-" in query:
+                try:
+                    q_parts = query.split("-")
+                    if len(q_parts) == 2:
+                        q_room = int(q_parts[0])
+                        q_seat = int(q_parts[1])
+                        
+                        s_room = int(room) if room.isdigit() else -1
+                        s_seat = int(seat) if seat.isdigit() else -1
+                        
+                        if s_room == q_room and s_seat == q_seat:
+                            found_index = idx
+                            break
+                except: pass
+            
+            if f"{room}-{seat}" == query:
+                found_index = idx
+                break
+                
+            # Check just seat if room is implicit? No, stick to explicit.
+            
+        if found_index != -1:
+            self.current_index = found_index
+            self.load_current_student()
+            # Clear search? Maybe keep it.
+        else:
+            messagebox.showinfo(self.t("title_success"), self.t("msg_student_not_found"))
 
     # --- Image Logic ---
     def zoom_in(self):
@@ -358,7 +443,9 @@ class ReviewWindow(ctk.CTkToplevel):
         if not self.image_files: return
         
         filename = self.image_files[self.current_index]
-        self.lbl_counter.configure(text=f"Student {self.current_index + 1} / {len(self.image_files)}")
+        # Update Counter
+        self.lbl_counter.configure(text=self.t("lbl_student_counter", index=self.current_index + 1, total=len(self.image_files)))
+        
         
         # 1. Load Image (Only if in image mode)
         if self.view_mode == 'image':
@@ -436,6 +523,21 @@ class ReviewWindow(ctk.CTkToplevel):
         else:
             self.report_textbox.delete("1.0", "end")
             self.report_textbox.insert("1.0", "No Report Generated")
+
+        # Update Status Label (Now that current_data is loaded)
+        review_count = self.current_data.get("review_count", 0)
+        status_text = self.t("status_unreviewed")
+        status_color = "red"
+        
+        if review_count == 1:
+            status_text = self.t("status_reviewed")
+            status_color = "green"
+        elif review_count >= 2:
+            status_text = self.t("status_second_review")
+            status_color = "blue"
+            
+        if hasattr(self, 'lbl_status'):
+            self.lbl_status.configure(text=self.t("lbl_status", status=status_text), text_color=status_color)
 
         # 4. Generate Steps & Load UI
         self.generate_steps()
@@ -548,7 +650,7 @@ class ReviewWindow(ctk.CTkToplevel):
         
         # --- Search Filter ---
         ctk.CTkLabel(parent, text=self.t("lbl_filter")).pack(anchor="w")
-        self.entry_filter = ctk.CTkEntry(parent, placeholder_text="Type to search...")
+        self.entry_filter = ctk.CTkEntry(parent, placeholder_text=self.t("lbl_filter"))
         self.entry_filter.pack(fill="x", pady=(0, 5))
         self.entry_filter.bind("<KeyRelease>", self.filter_student_list)
         
@@ -636,7 +738,13 @@ class ReviewWindow(ctk.CTkToplevel):
         ctk.CTkButton(btn_frame, text=self.t("btn_confirm_edit"), fg_color="#D97706", width=120, command=self.next_step).pack(side="left", padx=10)
 
     def confirm_all_and_next(self):
-        # 1. Save Info
+        # Debounce check (3 seconds)
+        import time
+        now = time.time()
+        if now - self.last_confirm_time < 3.0:
+            return
+        self.last_confirm_time = now
+        
         selected_str = self.combo_student.get()
         try:
             parts = selected_str.split(" | ")
@@ -679,7 +787,7 @@ class ReviewWindow(ctk.CTkToplevel):
             try:
                 val = float(entry.get())
                 if val > max_s:
-                    messagebox.showerror("Error", self.t("msg_score_error", qid=q_id, max=max_s))
+                    messagebox.showerror(self.t("title_error"), self.t("msg_score_error", qid=q_id, max=max_s))
                     return
                 if val.is_integer(): val = int(val)
                 
@@ -763,7 +871,7 @@ class ReviewWindow(ctk.CTkToplevel):
                 try:
                     val = float(entry.get())
                     if val > max_s:
-                        messagebox.showerror("Error", self.t("msg_score_error", qid=q_id, max=max_s))
+                        messagebox.showerror(self.t("title_error"), self.t("msg_score_error", qid=q_id, max=max_s))
                         return False
                     if val.is_integer(): val = int(val)
                     for item in self.current_data.get('details', []):
@@ -889,14 +997,14 @@ class ReviewWindow(ctk.CTkToplevel):
             def run_regrade():
                 success, msg = self.parent_app.regrade_single_file(img_path)
                 if success:
-                    self.after(0, lambda: messagebox.showinfo("Success", "Regrade complete! Reloading..."))
+                    self.after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_regrade_success")))
                     self.after(0, self.load_current_student)
                 else:
-                    self.after(0, lambda: messagebox.showerror("Error", f"Regrade failed: {msg}"))
+                    self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_regrade_failed", error=msg)))
             
             threading.Thread(target=run_regrade, daemon=True).start()
         else:
-            messagebox.showerror("Error", "Regrade functionality not available.")
+            messagebox.showerror(self.t("title_error"), self.t("msg_regrade_unavailable"))
 
     # --- Helper for Obj Count Change ---
     def on_obj_count_change(self, choice):
