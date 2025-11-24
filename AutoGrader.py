@@ -22,10 +22,10 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Mac AI 智能阅卷助手 (Pro)")
-        self.geometry("1100x800")
+        self.title("AI Exam Grader")
+        self.geometry("1200x820")
         ctk.set_appearance_mode("System")
-        ctk.set_default_color_theme("dark-blue")
+        ctk.set_default_color_theme("blue")
 
         self.config_manager = ConfigManager()
         self.student_manager = StudentManager()
@@ -85,136 +85,136 @@ class App(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         # --- Sidebar (Left) ---
-        self.sidebar_frame = ctk.CTkFrame(self, width=250, corner_radius=0)
+        self.sidebar_frame = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color=("#F5F5F7", "#1C1C1E"))
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="AI Exam Grader", font=ctk.CTkFont(size=24, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="AI Exam Grader", font=ctk.CTkFont(size=28, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=16, pady=(24, 16))
 
         # Language Selector
-        self.lbl_lang = ctk.CTkLabel(self.sidebar_frame, text="Language:", anchor="w")
-        self.lbl_lang.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language)
-        self.combo_lang.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.lbl_lang = ctk.CTkLabel(self.sidebar_frame, text="Language:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_lang.grid(row=1, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language, height=32, corner_radius=8)
+        self.combo_lang.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="ew")
 
         # ===== Configuration Profile Section =====
-        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_config_profile"), anchor="w")
-        self.lbl_config_profile.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_config_profile"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_config_profile.grid(row=3, column=0, padx=16, pady=(12, 4), sticky="w")
         
-        self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.get_profile_list(), command=self.on_profile_select)
-        self.combo_profile.grid(row=4, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.get_profile_list(), command=self.on_profile_select, height=32, corner_radius=8)
+        self.combo_profile.grid(row=4, column=0, padx=16, pady=(0, 8), sticky="ew")
         
         # Profile action buttons
         self.profile_btn_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.profile_btn_frame.grid(row=5, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.profile_btn_frame.grid(row=5, column=0, padx=16, pady=(0, 16), sticky="ew")
         self.profile_btn_frame.grid_columnconfigure(0, weight=1)
         self.profile_btn_frame.grid_columnconfigure(1, weight=1)
         
-        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_save_profile"), command=self.save_current_profile, width=60, height=28)
-        self.btn_save_profile.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_save_profile"), command=self.save_current_profile, width=60, height=32, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_save_profile.grid(row=0, column=0, padx=(0, 6), sticky="ew")
         
-        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=28, fg_color="darkred")
-        self.btn_delete_profile.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=32, fg_color=("#FF3B30", "#FF453A"), hover_color=("#D62C21", "#E0342D"), corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_delete_profile.grid(row=0, column=1, padx=(6, 0), sticky="ew")
 
         # API Config
-        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w")
-        self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...")
-        self.entry_key.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_key.grid(row=6, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...", height=32, corner_radius=8)
+        self.entry_key.grid(row=7, column=0, padx=16, pady=(0, 12), sticky="ew")
 
-        self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w")
-        self.lbl_base.grid(row=8, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...")
-        self.entry_base.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_base.grid(row=8, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...", height=32, corner_radius=8)
+        self.entry_base.grid(row=9, column=0, padx=16, pady=(0, 16), sticky="ew")
 
         # Provider & Model
-        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text="Service Provider:", anchor="w")
-        self.lbl_provider.grid(row=10, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text="Service Provider:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_provider.grid(row=10, column=0, padx=16, pady=(12, 4), sticky="w")
         self.provider_var = ctk.StringVar(value="OpenAI")
-        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change)
-        self.combo_provider.grid(row=11, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8)
+        self.combo_provider.grid(row=11, column=0, padx=16, pady=(0, 12), sticky="ew")
 
-        self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text="Model Name:", anchor="w")
-        self.lbl_model.grid(row=12, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"])
+        self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text="Model Name:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_model.grid(row=12, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"], height=32, corner_radius=8)
         self.combo_model.set("gemini-2.5-pro-maxthinking")
-        self.combo_model.grid(row=13, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12), sticky="ew")
         
-        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text="Check Models", command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"))
-        self.btn_check_model.grid(row=14, column=0, padx=20, pady=10, sticky="ew")
+        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text="Check Models", command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_check_model.grid(row=14, column=0, padx=16, pady=(8, 16), sticky="ew")
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 20), pady=20)
         self.main_frame.grid_rowconfigure(3, weight=1) # Log area expands
         self.main_frame.grid_columnconfigure(0, weight=1) # Allow content to expand horizontally
 
         # 1. File Selection Card
-        self.files_card = ctk.CTkFrame(self.main_frame)
-        self.files_card.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        self.files_card = ctk.CTkFrame(self.main_frame, corner_radius=12)
+        self.files_card.grid(row=0, column=0, sticky="ew", pady=(0, 16))
         self.files_card.grid_columnconfigure(1, weight=1)
 
-        self.lbl_resources = ctk.CTkLabel(self.files_card, text="Resources", font=ctk.CTkFont(size=16, weight="bold"))
-        self.lbl_resources.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        self.lbl_resources = ctk.CTkLabel(self.files_card, text="Resources", font=ctk.CTkFont(size=18, weight="bold"))
+        self.lbl_resources.grid(row=0, column=0, padx=20, pady=(16, 12), sticky="w")
 
         # Rubric
-        self.btn_rubric = ctk.CTkButton(self.files_card, text="📄 Upload Rubric", command=self.load_rubric, width=140)
-        self.btn_rubric.grid(row=1, column=0, padx=15, pady=5, sticky="w")
-        self.lbl_rubric_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"))
-        self.lbl_rubric_status.grid(row=1, column=1, padx=10, sticky="w")
+        self.btn_rubric = ctk.CTkButton(self.files_card, text="📄 Upload Rubric", command=self.load_rubric, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_rubric.grid(row=1, column=0, padx=20, pady=6, sticky="w")
+        self.lbl_rubric_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_rubric_status.grid(row=1, column=1, padx=12, sticky="w")
 
         # Folder
-        self.btn_folder = ctk.CTkButton(self.files_card, text="📂 Select Folder", command=self.select_folder, width=140)
-        self.btn_folder.grid(row=2, column=0, padx=15, pady=5, sticky="w")
-        self.lbl_folder_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"))
-        self.lbl_folder_status.grid(row=2, column=1, padx=10, sticky="w")
+        self.btn_folder = ctk.CTkButton(self.files_card, text="📂 Select Folder", command=self.select_folder, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_folder.grid(row=2, column=0, padx=20, pady=6, sticky="w")
+        self.lbl_folder_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_folder_status.grid(row=2, column=1, padx=12, sticky="w")
 
         # Student List
-        self.btn_list = ctk.CTkButton(self.files_card, text="👥 Student List", command=self.load_student_list, width=140)
-        self.btn_list.grid(row=3, column=0, padx=15, pady=(5, 15), sticky="w")
-        self.lbl_list_status = ctk.CTkLabel(self.files_card, text="Not Uploaded", text_color=("gray40", "gray60"))
-        self.lbl_list_status.grid(row=3, column=1, padx=10, pady=(5, 15), sticky="w")
+        self.btn_list = ctk.CTkButton(self.files_card, text="👥 Student List", command=self.load_student_list, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_list.grid(row=3, column=0, padx=20, pady=(6, 16), sticky="w")
+        self.lbl_list_status = ctk.CTkLabel(self.files_card, text="Not Uploaded", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_list_status.grid(row=3, column=1, padx=12, pady=(6, 16), sticky="w")
 
         # 2. Dashboard & Controls
         self.dashboard_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 15))
+        self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 16))
         self.dashboard_frame.grid_columnconfigure(0, weight=1)
         self.dashboard_frame.grid_columnconfigure(1, weight=1)
 
         # Controls
-        self.controls_card = ctk.CTkFrame(self.dashboard_frame)
-        self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.controls_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
+        self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         
-        self.btn_start = ctk.CTkButton(self.controls_card, text="▶️ Start Grading", fg_color="#106A38", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.start_grading_thread)
-        self.btn_start.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        self.btn_start = ctk.CTkButton(self.controls_card, text="▶️ Start Grading", fg_color=("#34C759", "#30D158"), hover_color=("#2DB04D", "#29C04A"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, command=self.start_grading_thread)
+        self.btn_start.pack(side="left", padx=12, pady=16, expand=True, fill="x")
         
-        self.btn_pause = ctk.CTkButton(self.controls_card, text="⏸️ Pause", fg_color="#D97706", text_color="white", height=50, font=("Arial", 16, "bold"), state="disabled", command=self.toggle_pause)
-        self.btn_pause.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        self.btn_pause = ctk.CTkButton(self.controls_card, text="⏸️ Pause", fg_color=("#FF9500", "#FF9F0A"), hover_color=("#E08600", "#E08F00"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, state="disabled", command=self.toggle_pause)
+        self.btn_pause.pack(side="left", padx=12, pady=16, expand=True, fill="x")
         
-        self.btn_stop = ctk.CTkButton(self.controls_card, text="⏹️ Stop", fg_color="#DC2626", text_color="white", height=50, font=("Arial", 16, "bold"), state="disabled", command=self.stop_grading)
-        self.btn_stop.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        self.btn_stop = ctk.CTkButton(self.controls_card, text="⏹️ Stop", fg_color=("#FF3B30", "#FF453A"), hover_color=("#D62C21", "#E0342D"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, state="disabled", command=self.stop_grading)
+        self.btn_stop.pack(side="left", padx=12, pady=16, expand=True, fill="x")
 
-        self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), fg_color="#4B5563", text_color="white", height=50, font=("Arial", 16, "bold"), command=self.open_review_window)
-        self.btn_review.pack(side="left", padx=10, pady=20, expand=True, fill="x")
+        self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), fg_color="transparent", border_width=2, border_color=("gray50", "gray60"), hover_color=("gray90", "gray20"), text_color=("gray10", "gray90"), height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, command=self.open_review_window)
+        self.btn_review.pack(side="left", padx=12, pady=16, expand=True, fill="x")
 
         # Stats
-        self.stats_card = ctk.CTkFrame(self.dashboard_frame)
-        self.stats_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self.stats_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
+        self.stats_card.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         
-        self.lbl_progress = ctk.CTkLabel(self.stats_card, text=self.t("lbl_progress", completed=0, total=0), font=("Arial", 16, "bold"))
-        self.lbl_progress.pack(pady=(15, 5))
+        self.lbl_progress = ctk.CTkLabel(self.stats_card, text=self.t("lbl_progress", completed=0, total=0), font=ctk.CTkFont(size=18, weight="bold"))
+        self.lbl_progress.pack(pady=(20, 6))
         
-        self.lbl_etr = ctk.CTkLabel(self.stats_card, text=self.t("lbl_etr", time="--:--"), font=("Arial", 14), text_color=("gray40", "gray60"))
-        self.lbl_etr.pack(pady=(0, 15))
+        self.lbl_etr = ctk.CTkLabel(self.stats_card, text=self.t("lbl_etr", time="--:--"), font=ctk.CTkFont(size=14), text_color=("gray40", "gray60"))
+        self.lbl_etr.pack(pady=(0, 20))
 
         # 3. Progress Bar
-        self.progress_bar = ctk.CTkProgressBar(self.main_frame, height=15)
-        self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 15))
+        self.progress_bar = ctk.CTkProgressBar(self.main_frame, height=8, corner_radius=4)
+        self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 16))
         self.progress_bar.set(0)
 
         # 4. Logs
-        self.log_box = ctk.CTkTextbox(self.main_frame, font=("Consolas", 12))
+        self.log_box = ctk.CTkTextbox(self.main_frame, font=ctk.CTkFont(family="SF Mono" if platform.system() == "Darwin" else "Consolas", size=12), corner_radius=12)
         self.log_box.grid(row=3, column=0, sticky="nsew")
 
     def load_initial_config(self):
