@@ -8,11 +8,19 @@
 
 ## Step-by-Step Build Process
 
-### 1. Clone Repository
+### 1. Get the Source Code
+
+**Option A: Using Git (Recommended)**
 ```bash
 git clone https://github.com/FIELA/AIExamGrader.git
 cd AIExamGrader
 ```
+
+**Option B: Download ZIP (No Git required)**
+1. Go to https://github.com/FIELA/AIExamGrader
+2. Click **Code** -> **Download ZIP**
+3. Extract the ZIP file
+4. Open PowerShell in the extracted folder
 
 ### 2. Create Virtual Environment
 ```bash
