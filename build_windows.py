@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 # Check dependencies
 try:
+    import google
     import google.generativeai
 except ImportError:
     print("❌ Error: google.generativeai not found. Please run: pip install google-generativeai")
@@ -27,9 +28,7 @@ args = [
     '--clean',  # Clean cache
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
-    '--runtime-hook=rthook_google.py', # Force google namespace fix
     '--hidden-import=PIL._tkinter_finder',
-    '--hidden-import=google',
     '--collect-all=customtkinter',
     '--collect-binaries=PIL',
     # Windows-specific optimizations
@@ -62,11 +61,23 @@ def add_metadata(name):
         print(f"  -> Warning: Could not copy metadata for {name}: {e}")
 
 print("Collecting dependencies...")
-add_package('google') # Collect the namespace package itself
-add_package('google.generativeai')
-add_package('google.ai.generativelanguage')
-add_package('google.api_core')
-add_package('google.auth')
+
+# BRUTE FORCE: Manually copy google package path
+# This bypasses PyInstaller's namespace package issues
+try:
+    # Find where 'google' is installed
+    google_path = os.path.dirname(google.generativeai.__file__) # Get into google/generativeai
+    google_path = os.path.dirname(google_path) # Go up to google/
+    
+    print(f"  -> Found google package at: {google_path}")
+    if os.path.exists(google_path):
+        args.append(f'--add-data={google_path};google')
+        print("  -> Added google directory to datas")
+    else:
+        print("  -> Warning: Could not find google directory path")
+except Exception as e:
+    print(f"  -> Error finding google path: {e}")
+
 add_package('grpc')
 
 print("Copying metadata...")
