@@ -83,10 +83,13 @@ If you see `cannot be loaded because running scripts is disabled on this system`
 3. Type `Y` and press Enter
 4. Try activating the venv again
 
-### Icon Missing
-If you see "icon.ico not found" error:
-- Make sure `assets/icon.ico` exists
-- Or remove the `--icon` line from `build_windows.py`
+### Network Timeout (pip install fails)
+If you see `ReadTimeoutError` or slow downloads:
+Use a mirror source (e.g., Tsinghua University):
+```bash
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install pyinstaller pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
 
 ### DLL Errors
 If users get DLL errors:
