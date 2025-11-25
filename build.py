@@ -18,9 +18,11 @@ args = [
     '--windowed',  # No terminal window
     '--noconfirm',  # Overwrite output directory
     '--clean',  # Clean cache
+    '--icon=assets/icon.icns',  # Custom application icon
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
     '--hidden-import=PIL._tkinter_finder', # Fix for some PIL issues
     '--collect-all=customtkinter', # Ensure all ctk submodules are found
+    '--collect-binaries=PIL',  # Collect PIL binary dependencies
 ]
 
 # Run PyInstaller
