@@ -2,6 +2,14 @@ import PyInstaller.__main__
 import customtkinter
 import os
 import sys
+from PyInstaller.utils.hooks import collect_all
+
+# Check dependencies
+try:
+    import google.generativeai
+except ImportError:
+    print("❌ Error: google.generativeai not found. Please run: pip install google-generativeai")
+    sys.exit(1)
 
 # Get customtkinter path for data inclusion
 ctk_path = os.path.dirname(customtkinter.__file__)
@@ -20,15 +28,34 @@ args = [
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
     '--hidden-import=PIL._tkinter_finder',
-    '--hidden-import=google.generativeai',
-    '--hidden-import=google.ai.generativelanguage',
+    '--hidden-import=google',
     '--collect-all=customtkinter',
-    '--collect-all=google.generativeai',
     '--collect-binaries=PIL',
     # Windows-specific optimizations
     '--exclude-module=tkinter.test',
     '--exclude-module=test',
 ]
+
+# Helper to collect package data
+def add_package(name):
+    try:
+        datas, binaries, hiddenimports = collect_all(name)
+        for src, dest in datas:
+            args.append(f'--add-data={src};{dest}')
+        for src, dest in binaries:
+            args.append(f'--add-binary={src};{dest}')
+        for h in hiddenimports:
+            args.append(f'--hidden-import={h}')
+        print(f"  -> Collected {name}")
+    except Exception as e:
+        print(f"  -> Warning: Could not collect {name}: {e}")
+
+print("Collecting dependencies...")
+add_package('google.generativeai')
+add_package('google.ai.generativelanguage')
+add_package('google.api_core')
+add_package('google.auth')
+add_package('grpc')
 
 # Run PyInstaller
 try:
