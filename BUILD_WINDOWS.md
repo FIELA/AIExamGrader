@@ -91,8 +91,11 @@ If you see `Microsoft Visual C++ 14.0 or greater is required` (often when instal
 4. Click **Install** (approx. 2-6 GB)
 5. Restart PowerShell and try again
 
-> **Note for Windows ARM64 Users (e.g., Parallels on Mac)**:
-> If installation still fails after installing Build Tools, try using **Python 3.11 or 3.12** instead of 3.13, as `grpcio` wheels might not be available for the latest Python version on ARM64 yet.
+> **⚠️ CRITICAL for Windows ARM64 Users (e.g., Parallels on Mac)**:
+> Python 3.13 does NOT yet have pre-built wheels for `grpcio` on Windows ARM64.
+> **You have two options:**
+> 1. **Recommended**: Uninstall Python 3.13 and install **Python 3.11**. This will allow `pip install` to work without compiling.
+> 2. **Alternative**: Install **Microsoft C++ Build Tools** (takes time and disk space) to compile `grpcio` from source.
 
 ### Network Timeout (pip install fails)
 If you see `ReadTimeoutError` or slow downloads:
