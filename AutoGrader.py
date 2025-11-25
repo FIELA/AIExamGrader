@@ -576,8 +576,17 @@ class App(ctk.CTk):
             
             if messagebox.askyesno(self.t("msg_grading_complete"), self.t("msg_enter_review")):
                 self.after(100, self.open_review_window)
+            self.btn_review.configure(state="normal")
         else:
             msg = self.t("msg_verification_fail", total=total) + "\n"
+            # Enable review if at least some reports exist
+            if len(missing_reports) < total:
+                self.btn_review.configure(state="normal")
+            else:
+                # If no reports found, keep disabled? Or enable if user wants to check?
+                # But ReviewWindow filters by report existence. So if 0 reports, it shows "No images".
+                # So enabling it is safe (it will just show empty or close).
+                self.btn_review.configure(state="normal")
             
             missing_set = set()
             
@@ -817,7 +826,7 @@ class App(ctk.CTk):
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
             '原始文件': 'Original File', '客观题': 'Objective Score',
             '客观题正确数': 'Objective Correct', '客观题总数': 'Objective Total',
-            '主观题': 'Subjective Score', '复审状态': 'Review Status'
+            '主观题': 'Subjective Score', '复审状态': 'Review Status', '缺考标记': 'Absence Marker'
         }
         
         # Translate data_dict keys if EN
@@ -834,41 +843,49 @@ class App(ctk.CTk):
             # Convert Room/Seat to int to remove leading zeros (e.g. "01" -> 1)
             if k in ['Room', 'Seat', '考场', '座号']:
                 try:
-                    final_data[k] = int(v)
+                    final_data[k] = int(str(v).strip())
                 except: pass
             # Convert Scores/ID to numbers if possible
             elif k in ['ID', '考号', 'Total Score', '总分', 'Objective Score', '客观题', 
                        'Subjective Score', '主观题', 'Objective Correct', '客观题正确数', 
                        'Objective Total', '客观题总数']:
                 try:
-                    if str(v).isdigit():
-                        final_data[k] = int(v)
+                    s_val = str(v).strip()
+                    if s_val.isdigit():
+                        final_data[k] = int(s_val)
                     else:
-                        final_data[k] = float(v)
-                        if final_data[k].is_integer():
-                            final_data[k] = int(final_data[k])
+                        val = float(s_val)
+                        if val.is_integer():
+                            final_data[k] = int(val)
+                        else:
+                            final_data[k] = val
                 except: pass
 
         # Dynamic headers based on final_data keys
         if is_en:
-            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Review Status', 'Total Score',
-                        'Objective Score', 'Subjective Score', 'Objective Correct', 'Objective Total',
-                        'OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
+            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Absence Marker', 'Review Status', 'Total Score',
+                        'Objective Score', 'Subjective Score', 'Objective Correct', 'Objective Total']
+            ocr_priority = ['OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
         else:
-            priority = ['考场', '座号', '班级', '姓名', '考号', '复审状态', '总分',
-                        '客观题', '主观题', '客观题正确数', '客观题总数',
-                        'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
+            priority = ['考场', '座号', '班级', '姓名', '考号', '缺考标记', '复审状态', '总分',
+                        '客观题', '主观题', '客观题正确数', '客观题总数']
+            ocr_priority = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
         
         headers = list(final_data.keys())
         # Only include priority fields that actually exist in data
         priority_in_data = [h for h in priority if h in headers]
-        remaining = [h for h in headers if h not in priority and h != ('Original File' if is_en else '原始文件')]
+        ocr_in_data = [h for h in ocr_priority if h in headers]
+        
+        # Remaining fields are usually subjective question details (e.g. "17(1)", "18")
+        remaining = [h for h in headers if h not in priority and h not in ocr_priority and h != ('Original File' if is_en else '原始文件')]
         
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
         
         remaining.sort(key=natural_sort_key)
-        sorted_headers = priority_in_data + remaining + [('Original File' if is_en else '原始文件')]
+        
+        # Final Order: Priority -> Subjective Details -> OCR Info -> Original File
+        sorted_headers = priority_in_data + remaining + ocr_in_data + [('Original File' if is_en else '原始文件')]
 
         with self.write_lock:
             file_exists = os.path.isfile(csv_path)
@@ -880,13 +897,37 @@ class App(ctk.CTk):
                         existing_headers = next(reader, [])
                 except: pass
             
-            final_headers = existing_headers if existing_headers else sorted_headers
+            # If headers mismatch (or new file), rewrite/write header
+            # Note: For simplicity in this grading context, if headers change, we append new columns
+            # But DictWriter handles this by ignoring extras or raising error.
+            # To fix "missing fields" in existing CSV, we should ideally rewrite the file if headers changed.
+            # Here we implement a check: if sorted_headers != existing_headers, we assume schema change.
+            
+            mode = 'a'
+            if file_exists and existing_headers != sorted_headers:
+                # Schema changed! We need to handle this.
+                # Strategy: Read all data, map to new schema, rewrite.
+                try:
+                    all_rows = []
+                    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                        reader = csv.DictReader(f)
+                        all_rows = list(reader)
+                    
+                    mode = 'w' # Rewrite mode
+                    # We will write all old rows + new row
+                except Exception as e:
+                    self.log(f"Error updating CSV schema: {e}")
+                    # Fallback to append (might cause issues but safer than data loss)
+                    mode = 'a'
             
             try:
-                with open(csv_path, mode='a', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.DictWriter(f, fieldnames=final_headers, extrasaction='ignore')
-                    if not file_exists:
+                with open(csv_path, mode, newline='', encoding='utf-8-sig') as f:
+                    writer = csv.DictWriter(f, fieldnames=sorted_headers, extrasaction='ignore')
+                    if mode == 'w' or not file_exists:
                         writer.writeheader()
+                        if mode == 'w':
+                            writer.writerows(all_rows)
+                    
                     writer.writerow(final_data)
                 self.after(0, lambda fn=csv_filename: self.log(self.t("log_csv_written", filename=fn)))
             except Exception as e:
@@ -973,7 +1014,7 @@ class App(ctk.CTk):
 
         for main_id, items in subjective_q.items():
             main_total = sum([x.get('score', 0) for x in items])
-            sub_scores_dict[f"{main_id}_总分"] = main_total
+            sub_scores_dict[f"{main_id}"] = main_total
 
         md = ""
         md += f"# 📝 阅卷报告\n\n"
@@ -1071,11 +1112,23 @@ class App(ctk.CTk):
         if subj_score_sum < 0: subj_score_sum = 0
         
         # Determine Review Status
-        review_status = "已复审" if data.get('review_count', 0) > 0 else "自动"
+        review_count = data.get('review_count', 0)
+        if review_count == 0:
+            review_status = ""
+        elif review_count == 1:
+            review_status = "已复审"
+        else:
+            review_status = "已二次复审"
+        
+        # Determine Absence (Filename OR Zero Score)
+        is_absent_filename = db_student_info.get('is_absent', False)
+        is_absent_score = (data.get('total_score', 0) == 0)
+        is_absent_final = is_absent_filename or is_absent_score
             
         summary_data = {
             '考场': exam_room, '座号': seat_no, '班级': db_student_info.get('class', '未知'), 
             '姓名': db_student_info.get('name', '未知'), '考号': db_student_info.get('id', '未知'),
+            '缺考标记': '是' if is_absent_final else '',
             '复审状态': review_status,
             '总分': data.get('total_score', 0),
             '客观题': obj_score_sum,
@@ -1121,7 +1174,8 @@ class App(ctk.CTk):
                 
             # 2. Resolve Student Info
             filename = os.path.basename(image_path)
-            student_info, _ = self.student_manager.get_student_by_filename(filename)
+            student_info, is_absent = self.student_manager.get_student_by_filename(filename)
+            student_info['is_absent'] = is_absent
             
             # 3. Save Report (Overwrites existing)
             self.save_markdown(result, filename, student_info)
@@ -1551,7 +1605,7 @@ class App(ctk.CTk):
             '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
-            '复审状态': 'Review Status'
+            '复审状态': 'Review Status', '缺考标记': 'Absence Marker', '确认缺考': 'Confirm Absence'
         }
         
         for jf in json_files:
@@ -1586,8 +1640,16 @@ class App(ctk.CTk):
                     'OCR手写考号': data.get('ocr_id_written', ''),
                     'OCR填涂考号': data.get('ocr_id_filled', ''),
                     '复审状态': review_status,
+                    '缺考标记': data.get('缺考标记', ''),
+                    '确认缺考': data.get('confirm_absence', ''),
                     '客观题': obj_score_sum
                 }
+                
+                # Translate Absence Markers if EN
+                if is_en:
+                    if summary.get('缺考标记') == '是': summary['缺考标记'] = 'Yes'
+                    if summary.get('确认缺考') == '是': summary['确认缺考'] = 'Yes'
+                    
                 summary.update(sub_scores_dict)
                 
                 # If EN, translate keys in summary
@@ -1659,6 +1721,7 @@ class App(ctk.CTk):
         self.btn_start.configure(state="normal")
         self.btn_pause.configure(state="disabled", text=self.t("btn_pause"), fg_color="#D97706")
         self.btn_stop.configure(state="disabled")
+        self.btn_review.configure(state="normal") # Enable review even if incomplete
 
 class TemplateConfirmDialog(ctk.CTkToplevel):
     def __init__(self, parent, layout_description, on_confirm):
