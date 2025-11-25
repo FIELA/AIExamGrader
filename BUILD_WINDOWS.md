@@ -73,6 +73,16 @@ Use [Inno Setup](https://jrsoftware.org/isinfo.php) to create a Windows installe
 
 ## Troubleshooting
 
+### PowerShell Script Error
+If you see `cannot be loaded because running scripts is disabled on this system`:
+1. Open PowerShell as Administrator
+2. Run this command to allow scripts:
+   ```powershell
+   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+   ```
+3. Type `Y` and press Enter
+4. Try activating the venv again
+
 ### Icon Missing
 If you see "icon.ico not found" error:
 - Make sure `assets/icon.ico` exists
