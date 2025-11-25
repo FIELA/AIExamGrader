@@ -3,7 +3,7 @@ import os
 import json
 from config_manager import ConfigManager
 from student_manager import StudentManager
-from utils import clean_json_string
+from utils import clean_json_string, sort_csv_headers
 
 class TestCore(unittest.TestCase):
     def test_clean_json_string(self):
@@ -52,6 +52,34 @@ class TestCore(unittest.TestCase):
         self.assertTrue(is_absent)
         
         os.remove("test_students.csv")
+        
+    def test_csv_header_order(self):
+        # Test input with mixed order and unknown fields
+        headers = [
+            'OCR姓名', '17', '总分', '姓名', '复审状态', 
+            '信息一致性', '考场', '18', '确认缺考'
+        ]
+        
+        sorted_headers = sort_csv_headers(headers)
+        
+        # Expected order:
+        # 1. Basic: 考场, 姓名
+        # 2. Status: 复审状态, 确认缺考
+        # 3. Scores: 总分
+        # 4. Questions: 17, 18
+        # 5. Details: 信息一致性
+        # 6. OCR: OCR姓名
+        
+        expected = [
+            '考场', '姓名', 
+            '复审状态', '确认缺考', 
+            '总分', 
+            '17', '18', 
+            '信息一致性', 
+            'OCR姓名'
+        ]
+        
+        self.assertEqual(sorted_headers, expected)
 
 if __name__ == '__main__':
     unittest.main()

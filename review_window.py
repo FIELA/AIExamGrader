@@ -1,8 +1,13 @@
 import customtkinter as ctk
+import shutil
+from utils import clean_json_string, sort_csv_headers
 from PIL import Image, ImageTk
+import platform
 import os
 import json
 import csv
+import copy
+from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
 import threading
@@ -81,13 +86,32 @@ class ReviewWindow(ctk.CTkToplevel):
         self.sub_entries = {}
         
         self.last_confirm_time = 0 # For debounce
+        self.chk_absence_var = ctk.BooleanVar() # Variable for absence checkbox
         
         self.load_file_list()
         self.setup_ui()
         
         # Check for saved progress
+        # Check for saved progress
         self.progress_file = os.path.join(self.exam_folder, "review_progress.json")
+        
+        # Default start index: First unreviewed student
         start_index = 0
+        for i, f in enumerate(self.image_files):
+            try:
+                student_info, _ = self.student_manager.get_student_by_filename(f)
+                room = str(student_info.get('room', '未知'))
+                seat = str(student_info.get('seat', '未知'))
+                json_path = os.path.join(self.reports_dir, f"{room}-{seat}.json")
+                
+                if os.path.exists(json_path):
+                    with open(json_path, 'r', encoding='utf-8') as jf:
+                        d = json.load(jf)
+                        if d.get('review_count', 0) == 0:
+                            start_index = i
+                            break
+            except: pass
+            
         if os.path.exists(self.progress_file):
             try:
                 with open(self.progress_file, "r") as f:
@@ -103,7 +127,9 @@ class ReviewWindow(ctk.CTkToplevel):
                         if dialog.result:
                             start_index = saved_idx
                         else:
-                            pass
+                            # If Restart chosen, force 0? Or keep unreviewed?
+                            # Usually Restart means from beginning.
+                            start_index = 0
             except: pass
             
         self.current_index = start_index
@@ -126,7 +152,30 @@ class ReviewWindow(ctk.CTkToplevel):
     def load_file_list(self):
         valid_extensions = ('.png', '.jpg', '.jpeg')
         if os.path.exists(self.exam_folder):
-            self.image_files = sorted([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+            all_files = sorted([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+            self.image_files = []
+            
+            # Filter: Only include files with generated reports (JSON)
+            for f in all_files:
+                try:
+                    student_info, _ = self.student_manager.get_student_by_filename(f)
+                    room = str(student_info.get('room', '未知'))
+                    seat = str(student_info.get('seat', '未知'))
+                    
+                    # Check JSON existence (primary data source)
+                    # Check JSON existence (primary data source)
+                    json_path = os.path.join(self.reports_dir, f"{room}-{seat}.json")
+                    if os.path.exists(json_path):
+                        self.image_files.append(f)
+                except: pass
+                
+            # If no files found via JSON check, maybe fallback to all files?
+            # User wants "only show completed", so strict filtering is better.
+            if not self.image_files and all_files:
+                # Fallback: If 0 reports found but images exist, maybe show all?
+                # But user specifically asked for "only completed".
+                # So we keep it empty if no reports.
+                pass
 
     def setup_ui(self):
         # Clear existing widgets
@@ -140,6 +189,7 @@ class ReviewWindow(ctk.CTkToplevel):
             
     def toggle_view_mode(self):
         self.view_mode = 'no_image' if self.view_mode == 'image' else 'image'
+        self.update_idletasks() # Ensure pending events are processed
         self.setup_ui()
         self.load_current_student()
 
@@ -148,25 +198,39 @@ class ReviewWindow(ctk.CTkToplevel):
         self.action_frame = ctk.CTkFrame(self, height=50)
         self.action_frame.pack(side="bottom", fill="x", padx=5, pady=5)
         
-        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=100, command=self.prev_step, fg_color="gray")
+        # --- Left Group ---
+        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=40, command=self.prev_step, fg_color="gray")
         self.btn_back.pack(side="left", padx=5, pady=10)
         
-        # Search
-        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=150)
+        self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
+        self.lbl_counter.pack(side="left", padx=10)
+        
+        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=120)
         self.entry_search.pack(side="left", padx=10)
         self.entry_search.bind("<Return>", lambda e: self.search_student())
         
-        self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
-        self.lbl_counter.pack(side="left", padx=20)
-        
+        # --- Center-Left Group ---
         self.lbl_status = ctk.CTkLabel(self.action_frame, text=self.t("lbl_status", status="--"), font=("Arial", 14, "bold"))
         self.lbl_status.pack(side="left", padx=20)
         
-        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_text_mode"), width=100, command=self.toggle_view_mode, fg_color="#0F766E")
+        self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
+        self.btn_logs.pack(side="left", padx=5)
+        
+        self.lbl_score = ctk.CTkLabel(self.action_frame, text=self.t("lbl_total_score_display", score="--"), font=("Arial", 14, "bold"), text_color="#2563EB")
+        self.lbl_score.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # --- Right Group (Packed from Right to Left) ---
+        self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
+        self.btn_confirm_all.pack(side="right", padx=10, pady=10)
+        
+        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=40, command=self.skip_student, fg_color="#D97706")
+        self.btn_next_image.pack(side="right", padx=5, pady=10)
+        
+        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_text_mode"), width=80, command=self.toggle_view_mode, fg_color="#0F766E")
         self.btn_mode.pack(side="right", padx=5)
         
-        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=100, command=self.skip_student, fg_color="#D97706") # Amber
-        self.btn_next_image.pack(side="right", padx=5, pady=10)
+        self.chk_absence = ctk.CTkCheckBox(self.action_frame, text=self.t("chk_absence"), variable=self.chk_absence_var, command=self.on_absence_toggle)
+        self.chk_absence.pack(side="right", padx=(0, 20))
 
         # --- Global Layout: Main Content (Top) ---
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -249,28 +313,41 @@ class ReviewWindow(ctk.CTkToplevel):
         self.action_frame = ctk.CTkFrame(self, height=50)
         self.action_frame.pack(side="bottom", fill="x", padx=5, pady=5)
         
-        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=100, command=self.prev_student, fg_color="gray")
+        # --- Left Group ---
+        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=40, command=self.prev_student, fg_color="gray")
         self.btn_back.pack(side="left", padx=5, pady=10)
         
-        # Search
-        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=150)
+        self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
+        self.lbl_counter.pack(side="left", padx=10)
+        
+        self.entry_search = ctk.CTkEntry(self.action_frame, placeholder_text=self.t("lbl_search_placeholder"), width=120)
         self.entry_search.pack(side="left", padx=10)
         self.entry_search.bind("<Return>", lambda e: self.search_student())
         
-        self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
-        self.lbl_counter.pack(side="left", padx=20)
-        
+        # --- Center-Left Group ---
         self.lbl_status = ctk.CTkLabel(self.action_frame, text=self.t("lbl_status", status="--"), font=("Arial", 14, "bold"))
         self.lbl_status.pack(side="left", padx=20)
         
-        self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=150, command=self.confirm_all_and_next, fg_color="#106A38")
-        self.btn_confirm_all.pack(side="right", padx=20, pady=10)
+        self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
+        self.btn_logs.pack(side="left", padx=5)
         
-        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=100, command=self.skip_student, fg_color="#D97706")
+        self.lbl_score = ctk.CTkLabel(self.action_frame, text=self.t("lbl_total_score_display", score="--"), font=("Arial", 14, "bold"), text_color="#2563EB")
+        self.lbl_score.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # --- Right Group (Packed from Right to Left) ---
+        self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
+        self.btn_confirm_all.pack(side="right", padx=10, pady=10)
+        
+        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=40, command=self.skip_student, fg_color="#D97706")
         self.btn_next_image.pack(side="right", padx=5, pady=10)
         
-        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_image_mode"), width=100, command=self.toggle_view_mode, fg_color="#0F766E")
+        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_image_mode"), width=80, command=self.toggle_view_mode, fg_color="#0F766E")
         self.btn_mode.pack(side="right", padx=5)
+        
+        self.chk_absence = ctk.CTkCheckBox(self.action_frame, text=self.t("chk_absence"), variable=self.chk_absence_var, command=self.on_absence_toggle)
+        self.chk_absence.pack(side="right", padx=(0, 20))
+        
+
 
         # --- Global Layout: Main Content (Top) ---
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -447,6 +524,8 @@ class ReviewWindow(ctk.CTkToplevel):
         self.lbl_counter.configure(text=self.t("lbl_student_counter", index=self.current_index + 1, total=len(self.image_files)))
         
         
+
+            
         # 1. Load Image (Only if in image mode)
         if self.view_mode == 'image':
             img_path = os.path.join(self.exam_folder, filename)
@@ -513,16 +592,41 @@ class ReviewWindow(ctk.CTkToplevel):
         if 'original_filename' not in self.current_data or not self.current_data['original_filename']:
             self.current_data['original_filename'] = filename
             
+        # Backup for Diff (Review Logs)
+        self.original_data = copy.deepcopy(self.current_data)
+            
+        # Update Absence Checkbox
+        # 1. Get Manual Confirmation
+        is_confirmed_str = self.current_data.get('confirm_absence', '')
+        
+        # 2. Get Auto Detection
+        is_absent = self.current_data.get('缺考标记') == '是' or self.current_data.get('Absence Marker') == '是'
+        
+        # Fallback to db_info if not in current_data
+        if not is_absent:
+            db_info = self.current_data.get('db_student_info', {})
+            is_absent = db_info.get('is_absent', False)
+            
+        # 3. Set Checkbox State
+        if is_confirmed_str:
+            # If manually set, use that
+            self.chk_absence_var.set(is_confirmed_str == '是')
+        else:
+            # Default to auto detection
+            self.chk_absence_var.set(is_absent)
+            
         # 3. Load Report Text
         md_name = f"{room}-{seat}.md"
         md_path = os.path.join(self.reports_dir, md_name)
+
+        
         if os.path.exists(md_path):
             with open(md_path, "r", encoding="utf-8") as f:
                 self.report_textbox.delete("1.0", "end")
                 self.report_textbox.insert("1.0", f.read())
         else:
             self.report_textbox.delete("1.0", "end")
-            self.report_textbox.insert("1.0", "No Report Generated")
+            self.report_textbox.insert("1.0", f"No Report Generated\nPath: {md_path}")
 
         # Update Status Label (Now that current_data is loaded)
         review_count = self.current_data.get("review_count", 0)
@@ -538,15 +642,74 @@ class ReviewWindow(ctk.CTkToplevel):
             
         if hasattr(self, 'lbl_status'):
             self.lbl_status.configure(text=self.t("lbl_status", status=status_text), text_color=status_color)
+            
+        self.update_score_display()
+            
+
 
         # 4. Generate Steps & Load UI
         self.generate_steps()
         
+        # 5. Start Confirm Countdown (Initialize timer first)
+        self.start_confirm_timer()
+        
+        # 6. Load UI Initial State
         if self.view_mode == 'image':
             self.current_step_index = 0
             self.load_step_ui()
         else:
             self.load_no_image_ui()
+        
+    def start_confirm_timer(self):
+        """Disable confirm button for 3 seconds to prevent accidental clicks"""
+        if not hasattr(self, 'btn_confirm_all'): return
+        
+        self.btn_confirm_all.configure(state="disabled")
+        self.confirm_timer_seconds = 3
+        self.update_confirm_button_state()
+        
+    def update_confirm_button_state(self):
+        if not hasattr(self, 'btn_confirm_all'): return
+        
+        # 1. Timer Logic
+        if self.confirm_timer_seconds > 0:
+            base_text = self.t("btn_confirm_next")
+            self.btn_confirm_all.configure(text=f"{base_text} ({self.confirm_timer_seconds})")
+            self.confirm_timer_seconds -= 1
+            self.after(1000, self.update_confirm_button_state)
+            return # Keep disabled while timer is running
+            
+        # 2. Timer Finished: Check Conditions
+        target_text = self.t("btn_confirm_next")
+        if self.btn_confirm_all.cget("text") != target_text:
+            self.btn_confirm_all.configure(text=target_text)
+        
+        target_state = "disabled"
+        if self.view_mode == 'image':
+            # Image Mode: Enable if on last step OR absence confirmed
+            is_absent = self.chk_absence_var.get()
+            if self.current_step_index == len(self.steps) - 1 or is_absent:
+                target_state = "normal"
+        else:
+            # Text Mode: Always enable after timer
+            target_state = "normal"
+            
+        if self.btn_confirm_all.cget("state") != target_state:
+            self.btn_confirm_all.configure(state=target_state)
+            
+    def on_absence_toggle(self):
+        # Update button state immediately if timer is not running
+        if self.confirm_timer_seconds <= 0:
+            self.update_confirm_button_state()
+        
+
+
+    def update_score_display(self):
+        if hasattr(self, 'lbl_score'):
+            score = self.current_data.get('total_score', 0)
+            self.lbl_score.configure(text=self.t("lbl_total_score_display", score=score))
+
+
 
     def generate_steps(self):
         self.steps = []
@@ -594,6 +757,9 @@ class ReviewWindow(ctk.CTkToplevel):
             self.render_obj_step(self.step_content_frame)
         elif step['type'] == 'subj':
             self.render_subj_step(step, self.step_content_frame)
+            
+        # Update Confirm Button State (for Image Mode step restriction)
+        self.update_confirm_button_state()
 
     def load_no_image_ui(self):
         # Populate Left Bottom: Info Only
@@ -666,7 +832,14 @@ class ReviewWindow(ctk.CTkToplevel):
         current_val = f"{db_info.get('name', '')} | {db_info.get('class','')}班 | {db_info.get('id', '')} | {db_info.get('room','')}-{db_info.get('seat','')}"
         
         self.combo_student = ctk.CTkComboBox(parent, values=self.full_student_list, width=400)
-        self.combo_student.set(current_val)
+        
+        # Try to find exact match to ensure consistent display
+        match = next((s for s in self.full_student_list if current_val == s), None)
+        if match:
+            self.combo_student.set(match)
+        else:
+            self.combo_student.set(current_val)
+            
         self.combo_student.pack(anchor="w", pady=5)
         
         # --- Re-grade Button ---
@@ -1027,6 +1200,8 @@ class ReviewWindow(ctk.CTkToplevel):
     def save_to_disk(self):
         if not self.current_data: return
         
+        self.update_score_display()
+        
         # 1. Save to JSON
         room = str(self.current_data.get('db_student_info', {}).get('room', '未知'))
         seat = str(self.current_data.get('db_student_info', {}).get('seat', '未知'))
@@ -1037,6 +1212,60 @@ class ReviewWindow(ctk.CTkToplevel):
         # Increment Review Count
         current_count = self.current_data.get('review_count', 0)
         self.current_data['review_count'] = current_count + 1
+        
+        # Update Absence
+        is_confirmed = self.chk_absence_var.get()
+        self.current_data['confirm_absence'] = '是' if is_confirmed else ''
+        # self.current_data['缺考标记'] = '是' if is_absent else '' # Don't overwrite auto-detection
+        
+        # --- Calculate Diff & Update Logs ---
+        if not hasattr(self, 'original_data'):
+             self.original_data = copy.deepcopy(self.current_data)
+             
+        changes = []
+        
+        # Check Total Score
+        old_score = self.original_data.get('total_score', 0)
+        new_score = self.current_data.get('total_score', 0)
+        if old_score != new_score:
+            changes.append(f"Total Score: {old_score} -> {new_score}")
+            
+        # Check Confirm Absence
+        old_abs = self.original_data.get('confirm_absence', '')
+        new_abs = self.current_data.get('confirm_absence', '')
+        if old_abs != new_abs:
+            changes.append(f"Confirm Absence: '{old_abs}' -> '{new_abs}'")
+            
+        # Check Question Details
+        old_details = {item['question_id']: item for item in self.original_data.get('details', [])}
+        new_details = {item['question_id']: item for item in self.current_data.get('details', [])}
+        
+        for q_id, new_item in new_details.items():
+            old_item = old_details.get(q_id)
+            if old_item:
+                if old_item.get('score') != new_item.get('score'):
+                    changes.append(f"Q{q_id} Score: {old_item.get('score')} -> {new_item.get('score')}")
+            else:
+                changes.append(f"Q{q_id} Added")
+                
+        # Always log confirmation if no other changes but review count increased
+        if not changes:
+            changes.append("Review Confirmed")
+                
+        if changes:
+            log_entry = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "changes": changes,
+                "user": "Reviewer" # Placeholder for future user auth
+            }
+            if 'review_logs' not in self.current_data:
+                self.current_data['review_logs'] = []
+            self.current_data['review_logs'].append(log_entry)
+            
+            # Update original_data for next save
+            self.original_data = copy.deepcopy(self.current_data)
+            
+        # ------------------------------------
         
         try:
             with open(json_path, "w", encoding="utf-8") as f:
@@ -1089,11 +1318,9 @@ class ReviewWindow(ctk.CTkToplevel):
                 headers = reader.fieldnames
                 rows = list(reader)
             
-            # Find row to update
-            db_info = self.current_data.get('db_student_info', {})
-            room = str(db_info.get('room', ''))
-            seat = str(db_info.get('seat', ''))
+            if not headers: return
             
+            # Ensure new columns exist in headers
             room_key = 'Room' if is_en else '考场'
             seat_key = 'Seat' if is_en else '座号'
             total_key = 'Total Score' if is_en else '总分'
@@ -1102,10 +1329,39 @@ class ReviewWindow(ctk.CTkToplevel):
             obj_total_key = 'Objective Total' if is_en else '客观题总数'
             subj_score_key = 'Subjective Score' if is_en else '主观题'
             status_key = 'Review Status' if is_en else '复审状态'
+            confirm_key = 'Confirm Absence' if is_en else '确认缺考'
+            
+            new_keys = [status_key, confirm_key, obj_score_key, obj_correct_key, obj_total_key, subj_score_key]
+            for key in new_keys:
+                if key not in headers:
+                    headers.append(key)
+            
+            # Sort Headers using shared utility
+            headers = sort_csv_headers(headers)
+            
+            # Helper to normalize values (remove leading zeros)
+            
+            # Helper to normalize values (remove leading zeros)
+            def normalize(val):
+                try:
+                    return str(int(val))
+                except:
+                    return str(val).strip()
+
+            # Find row to update
+            db_info = self.current_data.get('db_student_info', {})
+            target_room = normalize(db_info.get('room', ''))
+            target_seat = normalize(db_info.get('seat', ''))
+            
+            room_key = 'Room' if is_en else '考场'
+            seat_key = 'Seat' if is_en else '座号'
             
             row_found = False
             for row in rows:
-                if str(row.get(room_key, '')) == room and str(row.get(seat_key, '')) == seat:
+                csv_room = normalize(row.get(room_key, ''))
+                csv_seat = normalize(row.get(seat_key, ''))
+                
+                if csv_room == target_room and csv_seat == target_seat:
                     # Update scores
                     row[total_key] = str(self.current_data.get('total_score', 0))
                     
@@ -1131,7 +1387,22 @@ class ReviewWindow(ctk.CTkToplevel):
                     row[subj_score_key] = str(subj_score)
                     
                     # Update Review Status
-                    row[status_key] = "Reviewed" if is_en else "已复审"
+                    review_count = self.current_data.get('review_count', 0)
+                    if review_count == 0:
+                        status_str = ""
+                    elif review_count == 1:
+                        status_str = "Reviewed" if is_en else "已复审"
+                    else:
+                        status_str = "Second Review" if is_en else "已二次复审"
+                        
+                    row[status_key] = status_str
+                    
+                    # Update Confirm Absence
+                    is_confirmed = self.current_data.get('confirm_absence') == '是'
+                    if is_confirmed:
+                        row[confirm_key] = 'Confirm Absence' if is_en else '确认缺考'
+                    else:
+                        row[confirm_key] = ''
                     
                     # Update subjective question scores
                     for item in details:
@@ -1163,17 +1434,100 @@ class ReviewWindow(ctk.CTkToplevel):
                                     if val.is_integer(): r[k] = int(val)
                                     else: r[k] = val
                             except: pass
-
                 with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
                     writer.writerows(rows)
+
+            else:
+                # Silent failure or log to console only if needed, but user asked to cancel debug mode
+                pass
+                
+        except PermissionError:
+            messagebox.showerror(self.t("title_error"), self.t("msg_csv_permission_error") if hasattr(self, 't') else "CSV file is open. Please close it and try again.")
         except Exception as e:
             print(f"Error updating CSV: {e}")
+            messagebox.showerror(self.t("title_error"), f"Failed to update CSV: {str(e)}")
             # Fallback to callback
             if self.on_save_callback:
                 self.on_save_callback(self.current_data)
 
+
+    def show_review_logs(self):
+        """Show popup with review logs"""
+        logs = self.current_data.get('review_logs', [])
+        
+        if not logs:
+            messagebox.showinfo("Review Logs", "No review history found.")
+            return
+            
+        # Helper for translation
+        import re
+        def translate_log(msg):
+            if "Review Confirmed" in msg: return "复审已确认"
+            
+            # Total Score
+            m = re.match(r"Total Score: (\d+) -> (\d+)", msg)
+            if m: return f"总分: {m.group(1)} -> {m.group(2)}"
+            
+            # Confirm Absence
+            m = re.match(r"Confirm Absence: '(.+)' -> '(.+)'", msg)
+            if m: return f"确认缺考: '{m.group(1)}' -> '{m.group(2)}'"
+                
+            # Question Score
+            m = re.match(r"Q(.+) Score: (\d+) -> (\d+)", msg)
+            if m:
+                qid = m.group(1)
+                v1 = m.group(2)
+                v2 = m.group(3)
+                
+                # Try to find question type
+                q_type = "第 " + qid + " 题"
+                details = self.current_data.get('details', [])
+                for item in details:
+                    if str(item.get('question_id')) == qid:
+                        if "客观" in item.get('type', '') or "选择" in item.get('type', ''):
+                            q_type = "客观题"
+                        break
+                        
+                return f"{q_type}得分: {v1} -> {v2}"
+            
+            # Question Added
+            m = re.match(r"Q(.+) Added", msg)
+            if m: return f"第 {m.group(1)} 题 (新增)"
+            
+            return msg
+            
+        # Create Popup
+        top = ctk.CTkToplevel(self)
+        top.title("复审日志") # Localized Title
+        top.geometry("500x400")
+        
+        # Title
+        student_name = self.current_data.get('db_student_info', {}).get('name', 'Unknown')
+        lbl_title = ctk.CTkLabel(top, text=f"复审日志: {student_name}", font=("Arial", 16, "bold"))
+        lbl_title.pack(pady=10)
+        
+        # Scrollable Frame
+        scroll = ctk.CTkScrollableFrame(top)
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Populate Logs (Reverse Order)
+        for i, entry in enumerate(reversed(logs)):
+            frame = ctk.CTkFrame(scroll)
+            frame.pack(fill="x", pady=5)
+            
+            ts = entry.get('timestamp', 'Unknown Time')
+            user = entry.get('user', 'Unknown User')
+            if user == "Reviewer": user = "复审员" # Localize User
+            
+            lbl_header = ctk.CTkLabel(frame, text=f"[{ts}] {user}", font=("Arial", 12, "bold"), anchor="w")
+            lbl_header.pack(fill="x", padx=5, pady=2)
+            
+            for change in entry.get('changes', []):
+                display_text = translate_log(change)
+                lbl_change = ctk.CTkLabel(frame, text=f"  • {display_text}", anchor="w", text_color="gray")
+                lbl_change.pack(fill="x", padx=5)
 
     def save_progress_to_file(self):
         try:
