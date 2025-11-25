@@ -1100,6 +1100,8 @@ class ReviewWindow(ctk.CTkToplevel):
             obj_score_key = 'Objective Score' if is_en else '客观题'
             obj_correct_key = 'Objective Correct' if is_en else '客观题正确数'
             obj_total_key = 'Objective Total' if is_en else '客观题总数'
+            subj_score_key = 'Subjective Score' if is_en else '主观题'
+            status_key = 'Review Status' if is_en else '复审状态'
             
             row_found = False
             for row in rows:
@@ -1123,6 +1125,14 @@ class ReviewWindow(ctk.CTkToplevel):
                     row[obj_correct_key] = str(obj_correct)
                     row[obj_total_key] = str(obj_total)
                     
+                    # Calculate Subjective Score
+                    subj_score = self.current_data.get('total_score', 0) - obj_score
+                    if subj_score < 0: subj_score = 0
+                    row[subj_score_key] = str(subj_score)
+                    
+                    # Update Review Status
+                    row[status_key] = "Reviewed" if is_en else "已复审"
+                    
                     # Update subjective question scores
                     for item in details:
                         if "客观" not in item.get('type', '') and "选择" not in item.get('type', ''):
@@ -1135,6 +1145,25 @@ class ReviewWindow(ctk.CTkToplevel):
             
             # Write back to CSV
             if row_found:
+                # Numeric Conversion for Excel
+                for r in rows:
+                    for k, v in r.items():
+                        # Convert Room/Seat to int to remove leading zeros
+                        if k in ['Room', 'Seat', '考场', '座号']:
+                            try: r[k] = int(v)
+                            except: pass
+                        # Convert Scores/ID to numbers
+                        elif k in ['ID', '考号', 'Total Score', '总分', 'Objective Score', '客观题', 
+                                   'Subjective Score', '主观题', 'Objective Correct', '客观题正确数', 
+                                   'Objective Total', '客观题总数']:
+                            try:
+                                if str(v).isdigit(): r[k] = int(v)
+                                else:
+                                    val = float(v)
+                                    if val.is_integer(): r[k] = int(val)
+                                    else: r[k] = val
+                            except: pass
+
                 with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
