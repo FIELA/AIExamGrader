@@ -2,7 +2,7 @@ import PyInstaller.__main__
 import customtkinter
 import os
 import sys
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 # Check dependencies
 try:
@@ -27,6 +27,7 @@ args = [
     '--clean',  # Clean cache
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
+    '--runtime-hook=rthook_google.py', # Force google namespace fix
     '--hidden-import=PIL._tkinter_finder',
     '--hidden-import=google',
     '--collect-all=customtkinter',
@@ -50,12 +51,28 @@ def add_package(name):
     except Exception as e:
         print(f"  -> Warning: Could not collect {name}: {e}")
 
+# Helper to copy metadata
+def add_metadata(name):
+    try:
+        datas = copy_metadata(name)
+        for src, dest in datas:
+            args.append(f'--add-data={src};{dest}')
+        print(f"  -> Metadata copied for {name}")
+    except Exception as e:
+        print(f"  -> Warning: Could not copy metadata for {name}: {e}")
+
 print("Collecting dependencies...")
+add_package('google') # Collect the namespace package itself
 add_package('google.generativeai')
 add_package('google.ai.generativelanguage')
 add_package('google.api_core')
 add_package('google.auth')
 add_package('grpc')
+
+print("Copying metadata...")
+add_metadata('google-generativeai')
+add_metadata('google-api-core')
+add_metadata('google-auth')
 
 # Run PyInstaller
 try:
