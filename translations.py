@@ -12,18 +12,18 @@ TRANSLATIONS = {
         "check_failed": "检查失败",
         
         "lbl_resources": "资源文件",
-        "btn_rubric": "📄 上传评分标准",
-        "btn_folder": "📂 选择答题卡目录",
-        "btn_list": "👥 上传学生名单",
+        "btn_rubric": "上传评分标准",
+        "btn_folder": "选择答题卡目录",
+        "btn_list": "上传学生名单",
         "status_not_selected": "未选择",
         "status_not_uploaded": "未上传",
         "status_students": "{count} 名学生",
         "status_failed": "解析失败",
         
-        "btn_start": "▶️ 开始阅卷",
-        "btn_pause": "⏸️ 暂停",
-        "btn_resume": "▶️ 继续",
-        "btn_stop": "⏹️ 停止",
+        "btn_start": "开始阅卷",
+        "btn_pause": "暂停",
+        "btn_resume": "继续",
+        "btn_stop": "停止",
         
         "lbl_progress": "进度: {completed} / {total}",
         "lbl_etr": "预计剩余时间: {time}",
@@ -120,7 +120,7 @@ TRANSLATIONS = {
         "lbl_config_profile": "配置方案:",
         "btn_save_profile": "💾 保存",
         "btn_delete_profile": "🗑️ 删除",
-        "btn_review": "🔍 复审",
+        "btn_review": "复审",
         
         "msg_ready_start": "✨ 发现 {count} 个文件。就绪，请点击“开始阅卷”。",
         
@@ -176,7 +176,17 @@ TRANSLATIONS = {
         # Logsr Text Mode
         "msg_regrade_success": "重新阅卷完成！正在重新加载...",
         "msg_regrade_failed": "重新阅卷失败: {error}",
-        "msg_regrade_unavailable": "重新阅卷功能不可用。"
+        "msg_regrade_unavailable": "重新阅卷功能不可用。",
+        
+        # New Logging Keys
+        "log_api_sent": "📤 {filename}: API 请求已发送...",
+        "log_api_received": "📥 {filename}: API 回复已收到。",
+        "log_json_saved": "💾 {filename}: JSON 已保存。",
+        "log_report_saved": "📝 {filename}: 阅卷报告已保存。",
+        "log_confirm_absence": "• 确认缺考: '{old}' -> '{new}'",
+        "title_review_logs": "复审日志",
+        "lbl_review_logs_title": "复审日志: {name}",
+        "lbl_reviewer": "复审员"
     },
     "EN": {
         "app_title": "AI Exam Grader",
@@ -191,18 +201,18 @@ TRANSLATIONS = {
         "check_failed": "Check Failed",
         
         "lbl_resources": "Resources",
-        "btn_rubric": "📄 Upload Rubric",
-        "btn_folder": "📂 Select Folder",
-        "btn_list": "👥 Student List",
+        "btn_rubric": "Upload Rubric",
+        "btn_folder": "Select Folder",
+        "btn_list": "Student List",
         "status_not_selected": "Not Selected",
         "status_not_uploaded": "Not Uploaded",
         "status_students": "{count} Students",
         "status_failed": "Failed",
         
-        "btn_start": "▶️ Start Grading",
-        "btn_pause": "⏸️ Pause",
-        "btn_resume": "▶️ Resume",
-        "btn_stop": "⏹️ Stop",
+        "btn_start": "Start Grading",
+        "btn_pause": "Pause",
+        "btn_resume": "Resume",
+        "btn_stop": "Stop",
         
         "lbl_progress": "Progress: {completed} / {total}",
         "lbl_etr": "ETR: {time}",
@@ -299,7 +309,7 @@ TRANSLATIONS = {
         "lbl_config_profile": "Config Profile:",
         "btn_save_profile": "💾 Save",
         "btn_delete_profile": "🗑️ Delete",
-        "btn_review": "🔍 Review",
+        "btn_review": "Review",
         
         "msg_ready_start": "✨ Found {count} files. Ready to start grading.",
         
@@ -355,6 +365,16 @@ TRANSLATIONS = {
         # Logsr Text Mode
         "msg_regrade_success": "Regrade complete! Reloading...",
         "msg_regrade_failed": "Regrade failed: {error}",
-        "msg_regrade_unavailable": "Regrade functionality not available."
+        "msg_regrade_unavailable": "Regrade functionality not available.",
+        
+        # New Logging Keys
+        "log_api_sent": "📤 {filename}: API request sent...",
+        "log_api_received": "📥 {filename}: API response received.",
+        "log_json_saved": "💾 {filename}: JSON saved.",
+        "log_report_saved": "📝 {filename}: Grading report saved.",
+        "log_confirm_absence": "• Confirm Absence: '{old}' -> '{new}'",
+        "title_review_logs": "Review Logs",
+        "lbl_review_logs_title": "Review Logs: {name}",
+        "lbl_reviewer": "Reviewer"
     }
 }

@@ -48,6 +48,11 @@
     -   Estimated Time Remaining (ETR) updates
     -   Final verification counts for quality assurance
 
+-   **🎨 UI Refresh**:
+    -   Modern, clean interface with a new color theme
+    -   Intuitive icons for better navigation
+    -   Improved layout and readability
+
 ## 🚀 Quick Start
 
 ### 1. Requirements
@@ -188,12 +193,6 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for de
 This project is licensed under the Non-Commercial Educational License (NCEL-1.0) - see the [LICENSE](LICENSE) file for details.
 
 **For commercial use, please contact the project author for licensing options.**
-
-## 💬 Contact
-
-For questions, suggestions, or commercial licensing inquiries, please contact:
-- **Email**: [Your Email]
-- **GitHub Issues**: [Project Issues Page]
 
 ---
 

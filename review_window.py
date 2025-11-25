@@ -11,6 +11,7 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
 import threading
+from theme import Theme
 
 class ResumeDialog(ctk.CTkToplevel):
     def __init__(self, parent, title, message, btn_continue_text, btn_restart_text):
@@ -199,7 +200,7 @@ class ReviewWindow(ctk.CTkToplevel):
         self.action_frame.pack(side="bottom", fill="x", padx=5, pady=5)
         
         # --- Left Group ---
-        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=40, command=self.prev_step, fg_color="gray")
+        self.btn_back = ctk.CTkButton(self.action_frame, text=self.t("btn_back"), width=40, command=self.prev_step, fg_color=Theme.TEXT_MUTED_LIGHT)
         self.btn_back.pack(side="left", padx=5, pady=10)
         
         self.lbl_counter = ctk.CTkLabel(self.action_frame, text=self.t("lbl_student_counter", index=0, total=0))
@@ -213,20 +214,20 @@ class ReviewWindow(ctk.CTkToplevel):
         self.lbl_status = ctk.CTkLabel(self.action_frame, text=self.t("lbl_status", status="--"), font=("Arial", 14, "bold"))
         self.lbl_status.pack(side="left", padx=20)
         
-        self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
+        self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), image=self.parent_app.icons.get("document"), width=60, command=self.show_review_logs, fg_color=Theme.TEXT_MUTED_DARK)
         self.btn_logs.pack(side="left", padx=5)
         
         self.lbl_score = ctk.CTkLabel(self.action_frame, text=self.t("lbl_total_score_display", score="--"), font=("Arial", 14, "bold"), text_color="#2563EB")
         self.lbl_score.place(relx=0.5, rely=0.5, anchor="center")
         
         # --- Right Group (Packed from Right to Left) ---
-        self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
+        self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER)
         self.btn_confirm_all.pack(side="right", padx=10, pady=10)
         
-        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=40, command=self.skip_student, fg_color="#D97706")
+        self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=40, command=self.skip_student, fg_color=Theme.WARNING, hover_color=Theme.WARNING_HOVER)
         self.btn_next_image.pack(side="right", padx=5, pady=10)
         
-        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_text_mode"), width=80, command=self.toggle_view_mode, fg_color="#0F766E")
+        self.btn_mode = ctk.CTkButton(self.action_frame, text=self.t("btn_text_mode"), width=80, command=self.toggle_view_mode, fg_color=Theme.INFO)
         self.btn_mode.pack(side="right", padx=5)
         
         self.chk_absence = ctk.CTkCheckBox(self.action_frame, text=self.t("chk_absence"), variable=self.chk_absence_var, command=self.on_absence_toggle)
@@ -609,8 +610,8 @@ class ReviewWindow(ctk.CTkToplevel):
             
         # 3. Set Checkbox State
         if is_confirmed_str:
-            # If manually set, use that
-            self.chk_absence_var.set(is_confirmed_str == '是')
+            # If manually set, use that (handle both "Yes" and legacy "是")
+            self.chk_absence_var.set(is_confirmed_str in ['Yes', '是'])
         else:
             # Default to auto detection
             self.chk_absence_var.set(is_absent)
@@ -1213,9 +1214,9 @@ class ReviewWindow(ctk.CTkToplevel):
         current_count = self.current_data.get('review_count', 0)
         self.current_data['review_count'] = current_count + 1
         
-        # Update Absence
+        # Update Absence (store in English for data consistency)
         is_confirmed = self.chk_absence_var.get()
-        self.current_data['confirm_absence'] = '是' if is_confirmed else ''
+        self.current_data['confirm_absence'] = 'Yes' if is_confirmed else ''
         # self.current_data['缺考标记'] = '是' if is_absent else '' # Don't overwrite auto-detection
         
         # --- Calculate Diff & Update Logs ---
@@ -1230,7 +1231,7 @@ class ReviewWindow(ctk.CTkToplevel):
         if old_score != new_score:
             changes.append(f"Total Score: {old_score} -> {new_score}")
             
-        # Check Confirm Absence
+        # Check Confirm Absence (always log in English for data consistency)
         old_abs = self.original_data.get('confirm_absence', '')
         new_abs = self.current_data.get('confirm_absence', '')
         if old_abs != new_abs:
@@ -1464,15 +1465,20 @@ class ReviewWindow(ctk.CTkToplevel):
         # Helper for translation
         import re
         def translate_log(msg):
-            if "Review Confirmed" in msg: return "复审已确认"
+            is_cn = self.lang == "CN"
+            
+            if "Review Confirmed" in msg: 
+                return "复审已确认" if is_cn else "Review Confirmed"
             
             # Total Score
             m = re.match(r"Total Score: (\d+) -> (\d+)", msg)
-            if m: return f"总分: {m.group(1)} -> {m.group(2)}"
+            if m: 
+                return f"总分: {m.group(1)} -> {m.group(2)}" if is_cn else f"Total Score: {m.group(1)} -> {m.group(2)}"
             
             # Confirm Absence
             m = re.match(r"Confirm Absence: '(.+)' -> '(.+)'", msg)
-            if m: return f"确认缺考: '{m.group(1)}' -> '{m.group(2)}'"
+            if m: 
+                return f"确认缺考: '{m.group(1)}' -> '{m.group(2)}'" if is_cn else f"Confirm Absence: '{m.group(1)}' -> '{m.group(2)}'"
                 
             # Question Score
             m = re.match(r"Q(.+) Score: (\d+) -> (\d+)", msg)
@@ -1481,31 +1487,68 @@ class ReviewWindow(ctk.CTkToplevel):
                 v1 = m.group(2)
                 v2 = m.group(3)
                 
-                # Try to find question type
-                q_type = "第 " + qid + " 题"
-                details = self.current_data.get('details', [])
-                for item in details:
-                    if str(item.get('question_id')) == qid:
-                        if "客观" in item.get('type', '') or "选择" in item.get('type', ''):
-                            q_type = "客观题"
-                        break
-                        
-                return f"{q_type}得分: {v1} -> {v2}"
+                if is_cn:
+                    # Try to find question type
+                    q_type = "第 " + qid + " 题"
+                    details = self.current_data.get('details', [])
+                    for item in details:
+                        if str(item.get('question_id')) == qid:
+                            if "客观" in item.get('type', '') or "选择" in item.get('type', ''):
+                                q_type = "客观题"
+                            break
+                    return f"{q_type}得分: {v1} -> {v2}"
+                else:
+                    return f"Q{qid} Score: {v1} -> {v2}"
             
             # Question Added
             m = re.match(r"Q(.+) Added", msg)
-            if m: return f"第 {m.group(1)} 题 (新增)"
+            if m: 
+                return f"第 {m.group(1)} 题 (新增)" if is_cn else f"Q{m.group(1)} Added"
+            
+            # Confirm Absence (alternative pattern)
+            # Match: Confirm Absence: '' -> 'Yes' or similar
+            m = re.match(r"Confirm Absence: '(.*)' -> '(.+)'", msg)
+            if m:
+                old_val = m.group(1)
+                new_val = m.group(2)
+                # Translate values based on language
+                if is_cn:
+                    # Translate English to Chinese
+                    if old_val == "Yes": old_val = "是"
+                    elif old_val == "": old_val = ""
+                    if new_val == "Yes": new_val = "是"
+                    elif new_val == "": new_val = ""
+                    return f"确认缺考: '{old_val}' -> '{new_val}'"
+                else:
+                    # Keep English or translate Chinese to English
+                    if old_val == "是": old_val = "Yes"
+                    if new_val == "是": new_val = "Yes"
+                    return f"Confirm Absence: '{old_val}' -> '{new_val}'"
+            
+            # Also handle simpler pattern without arrows
+            m = re.match(r"Confirm Absence: (.+)", msg)
+            if m:
+                val = m.group(1)
+                # Translate values based on language
+                if is_cn:
+                    if val == "Yes": val = "是"
+                    elif val == "": val = ""
+                    return f"确认缺考: {val}"
+                else:
+                    if val == "是": val = "Yes"
+                    elif val == "": val = "No"
+                    return f"Confirm Absence: {val}"
             
             return msg
             
         # Create Popup
         top = ctk.CTkToplevel(self)
-        top.title("复审日志") # Localized Title
+        top.title(self.t("title_review_logs"))
         top.geometry("500x400")
         
         # Title
         student_name = self.current_data.get('db_student_info', {}).get('name', 'Unknown')
-        lbl_title = ctk.CTkLabel(top, text=f"复审日志: {student_name}", font=("Arial", 16, "bold"))
+        lbl_title = ctk.CTkLabel(top, text=self.t("lbl_review_logs_title", name=student_name), font=("Arial", 16, "bold"))
         lbl_title.pack(pady=10)
         
         # Scrollable Frame
@@ -1519,7 +1562,7 @@ class ReviewWindow(ctk.CTkToplevel):
             
             ts = entry.get('timestamp', 'Unknown Time')
             user = entry.get('user', 'Unknown User')
-            if user == "Reviewer": user = "复审员" # Localize User
+            if user == "Reviewer": user = self.t("lbl_reviewer")
             
             lbl_header = ctk.CTkLabel(frame, text=f"[{ts}] {user}", font=("Arial", 12, "bold"), anchor="w")
             lbl_header.pack(fill="x", padx=5, pady=2)

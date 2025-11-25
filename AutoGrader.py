@@ -17,6 +17,8 @@ from student_manager import StudentManager
 from grader_engine import AIGraderEngine
 from translations import TRANSLATIONS
 from review_window import ReviewWindow
+from theme import Theme
+from PIL import Image
 
 class App(ctk.CTk):
     def __init__(self):
@@ -26,6 +28,9 @@ class App(ctk.CTk):
         self.geometry("1200x820")
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
+        
+        # Load Icons
+        self.load_icons()
 
         self.config_manager = ConfigManager()
         self.student_manager = StudentManager()
@@ -53,6 +58,18 @@ class App(ctk.CTk):
         self.layout_description = None
         self.template_confirmed = False
         
+        # Set App Icon
+        try:
+            icon_path = os.path.join("assets", "icon.png")
+            if os.path.exists(icon_path):
+                # Use ImageTk for window icon
+                from PIL import ImageTk
+                icon_img = ImageTk.PhotoImage(file=icon_path)
+                self.wm_iconphoto(True, icon_img)
+                # Also try setting it for macOS dock if possible (often requires packaging, but this helps window)
+        except Exception as e:
+            print(f"Warning: Could not set app icon: {e}")
+
         self.setup_ui()
         self.load_initial_config()
         self.update_ui_text() # Apply initial language
@@ -63,14 +80,100 @@ class App(ctk.CTk):
             try: self.apply_mac_paste_fix_to_widget(self.combo_model._entry)
             except: pass
 
+    def load_icons(self):
+        self.icons = {}
+        icon_names = ["start", "pause", "stop", "review", "folder", "document"]
+        
+        def process_icon(img, color=None):
+            """
+            1. Remove background (assume corners are background).
+            2. Recolor non-transparent pixels to target color.
+            """
+            img = img.convert("RGBA")
+            data = img.getdata()
+            width, height = img.size
+            
+            # 1. Background Removal
+            # Sample corners to find background color
+            corners = [
+                data[0], # Top-left
+                data[width-1], # Top-right
+                data[(height-1)*width], # Bottom-left
+                data[len(data)-1] # Bottom-right
+            ]
+            
+            # Find most common corner color (simple voting)
+            bg_color = max(set(corners), key=corners.count)
+            
+            # If background is transparent, skip removal
+            if bg_color[3] < 50:
+                new_data = list(data)
+            else:
+                new_data = []
+                threshold = 40
+                bg_r, bg_g, bg_b = bg_color[:3]
+                
+                for item in data:
+                    # Check if pixel is close to background color
+                    r, g, b, a = item
+                    if a > 0 and \
+                       abs(r - bg_r) < threshold and \
+                       abs(g - bg_g) < threshold and \
+                       abs(b - bg_b) < threshold:
+                        new_data.append((0, 0, 0, 0)) # Transparent
+                    else:
+                        new_data.append(item)
+            
+            # 2. Recolor if color is specified
+            if color:
+                final_data = []
+                for item in new_data:
+                    if item[3] > 0: # If not transparent
+                        # Apply color but keep alpha
+                        final_data.append(color + (item[3],))
+                    else:
+                        final_data.append(item)
+                img.putdata(final_data)
+            else:
+                img.putdata(new_data)
+                
+            return img
+
+        for name in icon_names:
+            path = os.path.join("assets", "icons", f"{name}.png")
+            if os.path.exists(path):
+                pil_img = Image.open(path)
+                
+                # For solid buttons (Start, Pause, Stop, Folder, Document, Review), use White icons
+                if name in ["start", "pause", "stop", "folder", "document", "review"]:
+                    processed_img = process_icon(pil_img, (255, 255, 255))
+                    self.icons[name] = ctk.CTkImage(light_image=processed_img, dark_image=processed_img, size=(20, 20))
+            else:
+                self.icons[name] = None
+
     def apply_mac_paste_fix(self, ctk_widget):
         try:
             if hasattr(ctk_widget, "_entry"):
-                self.apply_mac_paste_fix_to_widget(ctk_widget._entry)
-        except Exception: pass
+                ctk_widget._entry.bind("<Command-v>", lambda e: ctk_widget._entry.event_generate("<<Paste>>"))
+                ctk_widget._entry.bind("<Command-c>", lambda e: ctk_widget._entry.event_generate("<<Copy>>"))
+                ctk_widget._entry.bind("<Command-x>", lambda e: ctk_widget._entry.event_generate("<<Cut>>"))
+                ctk_widget._entry.bind("<Command-a>", lambda e: ctk_widget._entry.select_range(0, 'end'))
+            else:
+                ctk_widget.bind("<Command-v>", lambda e: ctk_widget.event_generate("<<Paste>>"))
+                ctk_widget.bind("<Command-c>", lambda e: ctk_widget.event_generate("<<Copy>>"))
+                ctk_widget.bind("<Command-x>", lambda e: ctk_widget.event_generate("<<Cut>>"))
+                ctk_widget.bind("<Command-a>", lambda e: ctk_widget.select_range(0, 'end'))
+        except Exception as e:
+            print(f"Error applying Mac paste fix: {e}")
 
-    def apply_mac_paste_fix_to_widget(self, tk_widget):
-        tk_widget.bind("<Command-v>", self.paste_event_handler)
+    def apply_mac_paste_fix_to_widget(self, widget):
+        try:
+            widget.bind("<Command-v>", lambda e: widget.event_generate("<<Paste>>"))
+            widget.bind("<Command-c>", lambda e: widget.event_generate("<<Copy>>"))
+            widget.bind("<Command-x>", lambda e: widget.event_generate("<<Cut>>"))
+            widget.bind("<Command-a>", lambda e: widget.select_range(0, 'end'))
+        except Exception as e:
+            print(f"Error applying fix to widget: {e}")
 
     def paste_event_handler(self, event):
         try:
@@ -81,104 +184,118 @@ class App(ctk.CTk):
 
     def setup_ui(self):
         # Configure grid layout (1x2)
+        self.grid_columnconfigure(0, minsize=260, weight=0) # Enforce fixed sidebar width
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         # --- Sidebar (Left) ---
-        self.sidebar_frame = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color=("#F5F5F7", "#1C1C1E"))
+        self.sidebar_frame = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color=(Theme.BG_LIGHT, Theme.BG_DARK))
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_propagate(False) # Prevent resizing based on content
         self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=self.t("logo"), font=ctk.CTkFont(size=28, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=16, pady=(24, 16))
+        # Logo
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=self.t("logo"), font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        # Language Selector
-        self.lbl_lang = ctk.CTkLabel(self.sidebar_frame, text="Language:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_lang.grid(row=1, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language, height=32, corner_radius=8)
-        self.combo_lang.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="ew")
+        # Language Switcher
+        self.lbl_lang = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_language"), anchor="w")
+        self.lbl_lang.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
+        
+        self.combo_lang = ctk.CTkComboBox(self.sidebar_frame, values=["中文", "English"], command=self.change_language, width=220)
+        self.combo_lang.grid(row=2, column=0, padx=20, pady=(5, 20))
+        self.combo_lang.set("中文" if self.current_lang == "CN" else "English")
 
-        # ===== Configuration Profile Section =====
-        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_config_profile"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_config_profile.grid(row=3, column=0, padx=16, pady=(12, 4), sticky="w")
+        # Config Profile
+        self.lbl_config_profile = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_config_profile"), anchor="w")
+        self.lbl_config_profile.grid(row=3, column=0, padx=20, pady=(10, 0), sticky="w")
         
-        self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.get_profile_list(), command=self.on_profile_select, height=32, corner_radius=8)
-        self.combo_profile.grid(row=4, column=0, padx=16, pady=(0, 8), sticky="ew")
+        self.combo_profile = ctk.CTkComboBox(self.sidebar_frame, values=self.config_manager.get_profile_names(), command=self.on_profile_select, width=220) # Changed command to on_profile_select
+        self.combo_profile.grid(row=4, column=0, padx=20, pady=(5, 10))
+        # self.combo_profile.set(self.config_manager.current_profile) # This line might cause an error if current_profile is not set or profiles are empty. Handled in load_initial_config.
         
-        # Profile action buttons
-        self.profile_btn_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.profile_btn_frame.grid(row=5, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.profile_btn_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent", width=220)
+        self.profile_btn_frame.grid(row=5, column=0, padx=20, pady=(0, 20))
         self.profile_btn_frame.grid_columnconfigure(0, weight=1)
         self.profile_btn_frame.grid_columnconfigure(1, weight=1)
         
-        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_save_profile"), command=self.save_current_profile, width=60, height=32, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_save_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_save_profile"), command=self.save_current_profile, width=60, height=32, corner_radius=8, font=ctk.CTkFont(size=13), fg_color=Theme.PRIMARY, hover_color=Theme.PRIMARY_HOVER)
         self.btn_save_profile.grid(row=0, column=0, padx=(0, 6), sticky="ew")
         
-        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=32, fg_color=("#FF3B30", "#FF453A"), hover_color=("#D62C21", "#E0342D"), corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=32, fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER, corner_radius=8, font=ctk.CTkFont(size=13))
         self.btn_delete_profile.grid(row=0, column=1, padx=(6, 0), sticky="ew")
 
         # API Config
-        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_key.grid(row=6, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.entry_key = ctk.CTkEntry(self.sidebar_frame, show="*", placeholder_text="sk-...", height=32, corner_radius=8)
-        self.entry_key.grid(row=7, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w")
+        self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.entry_key = ctk.CTkEntry(self.sidebar_frame, width=220)
+        self.entry_key.grid(row=7, column=0, padx=20, pady=(5, 10))
+        
+        # Bind events for masking
+        self.entry_key.bind("<FocusIn>", self._on_key_focus_in)
+        self.entry_key.bind("<FocusOut>", self._on_key_focus_out)
+        self.entry_key.bind("<KeyRelease>", self._on_key_release)
 
+        # Provider & Model (Re-added as they were removed in the provided snippet but are essential)
         self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
         self.lbl_base.grid(row=8, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...", height=32, corner_radius=8)
-        self.entry_base.grid(row=9, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...", height=32, corner_radius=8, width=228)
+        self.entry_base.grid(row=9, column=0, padx=16, pady=(0, 16))
 
-        # Provider & Model
-        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text="Service Provider:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_provider"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
         self.lbl_provider.grid(row=10, column=0, padx=16, pady=(12, 4), sticky="w")
         self.provider_var = ctk.StringVar(value="OpenAI")
-        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8)
-        self.combo_provider.grid(row=11, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8, width=228)
+        self.combo_provider.grid(row=11, column=0, padx=16, pady=(0, 12))
 
-        self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text="Model Name:", anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_model"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
         self.lbl_model.grid(row=12, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"], height=32, corner_radius=8)
+        self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"], height=32, corner_radius=8, width=228)
         self.combo_model.set("gemini-2.5-pro-maxthinking")
-        self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12))
         
-        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text="Check Models", command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
-        self.btn_check_model.grid(row=14, column=0, padx=16, pady=(8, 16), sticky="ew")
+        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_check_model"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
+        self.btn_check_model.grid(row=14, column=0, padx=16, pady=(8, 16))
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 20), pady=20)
-        self.main_frame.grid_rowconfigure(3, weight=1) # Log area expands
-        self.main_frame.grid_columnconfigure(0, weight=1) # Allow content to expand horizontally
+        # Row 0: Files, Row 1: Dashboard, Row 2: Progress, Row 3: Logs
+        self.main_frame.grid_rowconfigure(0, weight=0)
+        self.main_frame.grid_rowconfigure(1, weight=0)
+        self.main_frame.grid_rowconfigure(2, weight=0)
+        self.main_frame.grid_rowconfigure(3, weight=1) # Give weight to logs
+        self.main_frame.grid_columnconfigure(0, weight=1)
 
-        # 1. File Selection Card
-        self.files_card = ctk.CTkFrame(self.main_frame, corner_radius=12)
-        self.files_card.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+        # 1. Files Card
+        self.files_card = ctk.CTkFrame(self.main_frame, corner_radius=12, fg_color=(Theme.BG_LIGHT, Theme.BG_DARK)) # Slightly darker/lighter than bg
+        self.files_card.grid(row=0, column=0, sticky="ew", pady=(0, 20))
         self.files_card.grid_columnconfigure(1, weight=1)
 
-        self.lbl_resources = ctk.CTkLabel(self.files_card, text="Resources", font=ctk.CTkFont(size=18, weight="bold"))
+        self.lbl_resources = ctk.CTkLabel(self.files_card, text=self.t("lbl_resources"), font=ctk.CTkFont(size=16, weight="bold"))
         self.lbl_resources.grid(row=0, column=0, padx=20, pady=(16, 12), sticky="w")
 
         # Rubric
-        self.btn_rubric = ctk.CTkButton(self.files_card, text="📄 Upload Rubric", command=self.load_rubric, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_rubric = ctk.CTkButton(self.files_card, text=" " + self.t("btn_rubric"), image=self.icons.get("document"), command=self.load_rubric, width=160, height=36, corner_radius=8, font=ctk.CTkFont(size=13), fg_color=Theme.INFO, text_color="white", anchor="w")
         self.btn_rubric.grid(row=1, column=0, padx=20, pady=6, sticky="w")
-        self.lbl_rubric_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_rubric_status = ctk.CTkLabel(self.files_card, text=self.t("status_not_selected"), text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
         self.lbl_rubric_status.grid(row=1, column=1, padx=12, sticky="w")
 
         # Folder
-        self.btn_folder = ctk.CTkButton(self.files_card, text="📂 Select Folder", command=self.select_folder, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_folder = ctk.CTkButton(self.files_card, text=" " + self.t("btn_folder"), image=self.icons.get("folder"), command=self.select_folder, width=160, height=36, corner_radius=8, font=ctk.CTkFont(size=13), fg_color=Theme.INFO, text_color="white", anchor="w")
         self.btn_folder.grid(row=2, column=0, padx=20, pady=6, sticky="w")
-        self.lbl_folder_status = ctk.CTkLabel(self.files_card, text="Not Selected", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_folder_status = ctk.CTkLabel(self.files_card, text=self.t("status_not_selected"), text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
         self.lbl_folder_status.grid(row=2, column=1, padx=12, sticky="w")
 
         # Student List
-        self.btn_list = ctk.CTkButton(self.files_card, text="👥 Student List", command=self.load_student_list, width=150, height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_list = ctk.CTkButton(self.files_card, text=" " + self.t("btn_list"), image=self.icons.get("document"), command=self.load_student_list, width=160, height=36, corner_radius=8, font=ctk.CTkFont(size=13), fg_color=Theme.INFO, text_color="white", anchor="w")
         self.btn_list.grid(row=3, column=0, padx=20, pady=(6, 16), sticky="w")
-        self.lbl_list_status = ctk.CTkLabel(self.files_card, text="Not Uploaded", text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
+        self.lbl_list_status = ctk.CTkLabel(self.files_card, text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
         self.lbl_list_status.grid(row=3, column=1, padx=12, pady=(6, 16), sticky="w")
 
-        # 2. Dashboard & Controls
+        # 2. Dashboard / Controls
         self.dashboard_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 16))
+        self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         self.dashboard_frame.grid_columnconfigure(0, weight=1)
         self.dashboard_frame.grid_columnconfigure(1, weight=1)
 
@@ -186,36 +303,46 @@ class App(ctk.CTk):
         self.controls_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
         self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         
-        self.btn_start = ctk.CTkButton(self.controls_card, text="▶️ Start Grading", fg_color=("#34C759", "#30D158"), hover_color=("#2DB04D", "#29C04A"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, command=self.start_grading_thread)
-        self.btn_start.pack(side="left", padx=12, pady=16, expand=True, fill="x")
+        # Ultra Compact buttons: height 40, pady 5
+        self.btn_start = ctk.CTkButton(self.controls_card, text=self.t("btn_start"), image=self.icons.get("start"), fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.start_grading_thread, anchor="center")
+        self.btn_start.pack(side="left", padx=8, pady=5, expand=True, fill="x")
         
-        self.btn_pause = ctk.CTkButton(self.controls_card, text="⏸️ Pause", fg_color=("#FF9500", "#FF9F0A"), hover_color=("#E08600", "#E08F00"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, state="disabled", command=self.toggle_pause)
-        self.btn_pause.pack(side="left", padx=12, pady=16, expand=True, fill="x")
+        self.btn_pause = ctk.CTkButton(self.controls_card, text=self.t("btn_pause"), image=self.icons.get("pause"), fg_color=Theme.WARNING, hover_color=Theme.WARNING_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, state="disabled", command=self.toggle_pause, anchor="center")
+        self.btn_pause.pack(side="left", padx=8, pady=5, expand=True, fill="x")
         
-        self.btn_stop = ctk.CTkButton(self.controls_card, text="⏹️ Stop", fg_color=("#FF3B30", "#FF453A"), hover_color=("#D62C21", "#E0342D"), text_color="white", height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, state="disabled", command=self.stop_grading)
-        self.btn_stop.pack(side="left", padx=12, pady=16, expand=True, fill="x")
+        self.btn_stop = ctk.CTkButton(self.controls_card, text=self.t("btn_stop"), image=self.icons.get("stop"), fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, state="disabled", command=self.stop_grading, anchor="center")
+        self.btn_stop.pack(side="left", padx=8, pady=5, expand=True, fill="x")
 
-        self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), fg_color="transparent", border_width=2, border_color=("gray50", "gray60"), hover_color=("gray90", "gray20"), text_color=("gray10", "gray90"), height=52, font=ctk.CTkFont(size=15, weight="bold"), corner_radius=10, command=self.open_review_window)
-        self.btn_review.pack(side="left", padx=12, pady=16, expand=True, fill="x")
+        self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), image=self.icons.get("review"), fg_color=Theme.INFO, hover_color=Theme.PRIMARY_HOVER, text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_review_window, anchor="center")
+        self.btn_review.pack(side="left", padx=8, pady=5, expand=True, fill="x")
 
         # Stats
         self.stats_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
         self.stats_card.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         
-        self.lbl_progress = ctk.CTkLabel(self.stats_card, text=self.t("lbl_progress", completed=0, total=0), font=ctk.CTkFont(size=18, weight="bold"))
-        self.lbl_progress.pack(pady=(20, 6))
+        # Ultra Compact stats
+        self.lbl_progress = ctk.CTkLabel(self.stats_card, text=self.t("lbl_progress", completed=0, total=0), font=ctk.CTkFont(size=16, weight="bold"))
+        self.lbl_progress.pack(pady=(5, 0))
         
-        self.lbl_etr = ctk.CTkLabel(self.stats_card, text=self.t("lbl_etr", time="--:--"), font=ctk.CTkFont(size=14), text_color=("gray40", "gray60"))
-        self.lbl_etr.pack(pady=(0, 20))
+        self.lbl_etr = ctk.CTkLabel(self.stats_card, text=self.t("lbl_etr", time="--:--"), font=ctk.CTkFont(size=12), text_color=("gray40", "gray60"))
+        self.lbl_etr.pack(pady=(0, 5))
 
-        # 3. Progress Bar
-        self.progress_bar = ctk.CTkProgressBar(self.main_frame, height=8, corner_radius=4)
-        self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 16))
+        # 3. Progress Bar (Restored visibility but kept compact padding)
+        self.progress_bar = ctk.CTkProgressBar(self.main_frame, height=6, corner_radius=3)
+        self.progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 5))
         self.progress_bar.set(0)
 
-        # 4. Logs
-        self.log_box = ctk.CTkTextbox(self.main_frame, font=ctk.CTkFont(family="SF Mono" if platform.system() == "Darwin" else "Consolas", size=12), corner_radius=12)
-        self.log_box.grid(row=3, column=0, sticky="nsew")
+        # 4. Logs (Expandable)
+        self.log_frame = ctk.CTkFrame(self.main_frame, corner_radius=12, fg_color="transparent")
+        self.log_frame.grid(row=3, column=0, sticky="nsew")
+        self.log_frame.grid_rowconfigure(0, weight=1)
+        self.log_frame.grid_columnconfigure(0, weight=1)
+
+        self.log_box = ctk.CTkTextbox(self.log_frame, font=ctk.CTkFont(family="SF Mono" if platform.system() == "Darwin" else "Consolas", size=12), corner_radius=12)
+        self.log_box.grid(row=0, column=0, sticky="nsew")
+        
+        # Ensure row 3 (logs) takes up remaining space
+        self.main_frame.grid_rowconfigure(3, weight=1)
 
     def load_initial_config(self):
         api_key = self.config_manager.get("api_key", "")
@@ -254,42 +381,53 @@ class App(ctk.CTk):
         profiles = self.config_manager.get_profile_names()
         return profiles if profiles else ["<No Profiles>"]
     
-    def on_profile_select(self, profile_name):
-        """Load selected profile"""
-        if profile_name == "<No Profiles>":
+    def on_profile_select(self, choice):
+        """Handle profile selection change"""
+        if choice == "<No Profiles>":
             return
         
-        profile_data = self.config_manager.load_profile(profile_name)
+        profile_data = self.config_manager.load_profile(choice)
         if profile_data:
             self.apply_profile(profile_data)
-            self.log(self.t("log_loaded_profile", profile=profile_name))
+            # Update last_used in config
+            self.config_manager.set("last_used", choice)
+            self.log(self.t("log_loaded_profile", profile=choice))
     
     def save_current_profile(self):
-        """Save current configuration as a profile"""
-        dialog = ctk.CTkInputDialog(text="Enter profile name:", title="Save Configuration Profile")
+        """Save current settings as a profile"""
+        # Get current settings
+        # Use self.current_api_key if available, else get from entry
+        api_key = getattr(self, "current_api_key", self.entry_key.get())
+        # If the entry is currently masked, we must ensure we don't save the masked string
+        if api_key.startswith("sk-") and "..." in api_key:
+             # This is a safety check, but ideally current_api_key should always be correct
+             # If we are in masked state, self.current_api_key holds the real key
+             pass
+        
+        profile_data = {
+            "api_key": api_key,
+            "base_url": self.entry_base.get().strip(),
+            "provider": self.provider_var.get(),
+            "model": self.combo_model.get(),
+            "rubric_path": getattr(self, "rubric_path", ""),
+            "exam_folder": getattr(self, "exam_folder", ""),
+            "student_list": getattr(self.student_manager, "student_file", "") if hasattr(self, "student_manager") else ""
+        }
+        
+        # Ask for profile name
+        dialog = ctk.CTkInputDialog(text=self.t("msg_enter_profile_name"), title=self.t("title_save_profile"))
         profile_name = dialog.get_input()
         
         if not profile_name or profile_name.strip() == "":
             return
-        
+            
         profile_name = profile_name.strip()
-        
-        # Gather current configuration
-        profile_data = {
-            "provider": self.provider_var.get(),
-            "api_key": self.entry_key.get().strip(),
-            "base_url": self.entry_base.get().strip(),
-            "model": self.combo_model.get(),
-            "rubric_path": self.rubric_path,
-            "exam_folder": self.exam_folder,
-            "student_list": self.student_manager.student_path if hasattr(self.student_manager, 'student_path') else ""
-        }
-        
+
         # Save profile
         self.config_manager.save_profile(profile_name, profile_data)
         
         # Update dropdown
-        self.combo_profile.configure(values=self.get_profile_list())
+        self.combo_profile.configure(values=self.config_manager.get_profile_names())
         self.combo_profile.set(profile_name)
         
         self.log(self.t("log_saved_profile", profile=profile_name))
@@ -313,13 +451,37 @@ class App(ctk.CTk):
                 self.combo_profile.set(profiles[0])
             
             self.log(self.t("log_deleted_profile", profile=profile_name))
+
+    def _mask_api_key(self, key):
+        if not key or len(key) < 8:
+            return key
+        return f"{key[:3]}...{key[-3:]}"
+
+    def _on_key_focus_in(self, event):
+        """Show real key on focus"""
+        if hasattr(self, "current_api_key"):
+            self.entry_key.delete(0, "end")
+            self.entry_key.insert(0, self.current_api_key)
+
+    def _on_key_focus_out(self, event):
+        """Mask key on focus out"""
+        key = self.entry_key.get()
+        self.current_api_key = key # Update current key
+        masked = self._mask_api_key(key)
+        self.entry_key.delete(0, "end")
+        self.entry_key.insert(0, masked)
+        
+    def _on_key_release(self, event):
+        """Update current key as user types"""
+        self.current_api_key = self.entry_key.get()
     
     def apply_profile(self, profile_data):
         """Apply a profile's configuration to the UI"""
         # Set API settings
         if "api_key" in profile_data:
+            self.current_api_key = profile_data["api_key"]
             self.entry_key.delete(0, "end")
-            self.entry_key.insert(0, profile_data["api_key"])
+            self.entry_key.insert(0, self._mask_api_key(self.current_api_key))
         
         if "base_url" in profile_data:
             self.entry_base.delete(0, "end")
@@ -348,7 +510,7 @@ class App(ctk.CTk):
             if os.path.exists(student_path):
                 count = self.student_manager.load_from_file(student_path)
                 if count > 0:
-                    self.lbl_list_status.configure(text=f"{count} students", text_color=("green", "lightgreen"))
+                    self.lbl_list_status.configure(text=self.t("status_students", count=count), text_color=("green", "lightgreen"))
 
 
     def t(self, key, **kwargs):
@@ -387,8 +549,20 @@ class App(ctk.CTk):
             self.lbl_rubric_status.configure(text=self.t("status_not_selected"))
         if "Not Selected" in self.lbl_folder_status.cget("text") or "未选择" in self.lbl_folder_status.cget("text"):
             self.lbl_folder_status.configure(text=self.t("status_not_selected"))
-        if "Not Uploaded" in self.lbl_list_status.cget("text") or "未上传" in self.lbl_list_status.cget("text"):
-             self.lbl_list_status.configure(text=self.t("status_not_uploaded"))
+        
+        # Update student list status - handle both "Not Uploaded" and student count
+        current_list_text = self.lbl_list_status.cget("text")
+        if "Not Uploaded" in current_list_text or "未上传" in current_list_text:
+            self.lbl_list_status.configure(text=self.t("status_not_uploaded"))
+        elif current_list_text:  # If there's any text
+            # Extract count from current text and update with translation
+            import re
+            match = re.search(r'(\d+)', current_list_text)
+            if match:
+                count = int(match.group(1))
+                # Check if it looks like a student count (has number + text)
+                if "student" in current_list_text.lower() or "名学生" in current_list_text or "学生" in current_list_text:
+                    self.lbl_list_status.configure(text=self.t("status_students", count=count))
              
         self.btn_start.configure(text=self.t("btn_start"))
         if self.pause_event.is_set():
@@ -410,7 +584,8 @@ class App(ctk.CTk):
                 self.combo_model.set("gemini-1.5-pro")
 
     def check_models(self):
-        api_key = self.entry_key.get()
+        # Use current_api_key if available
+        api_key = getattr(self, "current_api_key", self.entry_key.get())
         if not api_key:
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
@@ -1075,7 +1250,6 @@ class App(ctk.CTk):
         filename_prefix = f"{exam_room}-{seat_no}"
         
         # Generate Content
-        # Generate Content
         md_content, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_student_info)
         
         reports_dir = os.path.join(self.exam_folder, "reports")
@@ -1157,7 +1331,9 @@ class App(ctk.CTk):
         # Ensure grader engine exists
         if not hasattr(self, 'grader_engine') or self.grader_engine is None:
             try:
-                self.grader_engine = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+                # Use current_api_key if available
+                api_key = getattr(self, "current_api_key", self.entry_key.get())
+                self.grader_engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             except Exception as e:
                 self.log(self.t("log_engine_init_failed", error=e))
                 return False, str(e)
@@ -1341,9 +1517,15 @@ class App(ctk.CTk):
             if self.stop_event.is_set():
                 return False
                 
+            # Log API Request
+            self.after(0, lambda fn=filename: self.log(self.t("log_api_sent", filename=fn)))
+
             # Pass layout_description if available
             result = grader.grade_exam(rubric_text, image_path, self.layout_description)
             
+            # Log API Response
+            self.after(0, lambda fn=filename: self.log(self.t("log_api_received", filename=fn)))
+
             if 'error' in result:
                 err_msg = result['error']
                 self.after(0, lambda fn=filename, e=err_msg: self.log(self.t("log_processing_error", filename=fn, error=e)))
@@ -1360,6 +1542,10 @@ class App(ctk.CTk):
             # Save Report
             with self.write_lock:
                 self.save_markdown(result, filename, student_info)
+                
+                # Log Saved Status
+                self.after(0, lambda fn=filename: self.log(self.t("log_json_saved", filename=fn)))
+                self.after(0, lambda fn=filename: self.log(self.t("log_report_saved", filename=fn)))
                 
                 # Increment counters AFTER successful completion (within lock)
                 self.completed_count += 1
@@ -1392,7 +1578,21 @@ class App(ctk.CTk):
     def process_images(self, target_files=None):
         try:
             with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
-            grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            
+            # Use current_api_key if available (handles masking), else fallback to entry
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            # Double check: if api_key is masked (starts with sk- and has ...), try to get from entry if entry is not masked?
+            # Actually, current_api_key should always be the real key if logic is correct.
+            # If entry has real key (user typed it but didn't trigger focus out?), use entry.
+            entry_val = self.entry_key.get()
+            if not api_key.startswith("sk-") or "..." not in api_key:
+                 # api_key seems valid or at least not obviously masked
+                 pass
+            elif entry_val and not entry_val.startswith("sk-") or "..." not in entry_val:
+                 # Entry has unmasked key, use it
+                 api_key = entry_val
+            
+            grader = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             valid_extensions = ('.png', '.jpg', '.jpeg')
             
             # ===== PHASE 1: Main Folder Processing =====
