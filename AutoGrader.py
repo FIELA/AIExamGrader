@@ -816,7 +816,8 @@ class App(ctk.CTk):
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
             '原始文件': 'Original File', '客观题': 'Objective Score',
-            '客观题正确数': 'Objective Correct', '客观题总数': 'Objective Total'
+            '客观题正确数': 'Objective Correct', '客观题总数': 'Objective Total',
+            '主观题': 'Subjective Score', '复审状态': 'Review Status'
         }
         
         # Translate data_dict keys if EN
@@ -828,14 +829,34 @@ class App(ctk.CTk):
         else:
             final_data = data_dict
 
+        # Numeric Conversion for Excel
+        for k, v in final_data.items():
+            # Convert Room/Seat to int to remove leading zeros (e.g. "01" -> 1)
+            if k in ['Room', 'Seat', '考场', '座号']:
+                try:
+                    final_data[k] = int(v)
+                except: pass
+            # Convert Scores/ID to numbers if possible
+            elif k in ['ID', '考号', 'Total Score', '总分', 'Objective Score', '客观题', 
+                       'Subjective Score', '主观题', 'Objective Correct', '客观题正确数', 
+                       'Objective Total', '客观题总数']:
+                try:
+                    if str(v).isdigit():
+                        final_data[k] = int(v)
+                    else:
+                        final_data[k] = float(v)
+                        if final_data[k].is_integer():
+                            final_data[k] = int(final_data[k])
+                except: pass
+
         # Dynamic headers based on final_data keys
         if is_en:
-            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Total Score',
-                        'Objective Score', 'Objective Correct', 'Objective Total',
+            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Review Status', 'Total Score',
+                        'Objective Score', 'Subjective Score', 'Objective Correct', 'Objective Total',
                         'OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
         else:
-            priority = ['考场', '座号', '班级', '姓名', '考号', '总分',
-                        '客观题', '客观题正确数', '客观题总数',
+            priority = ['考场', '座号', '班级', '姓名', '考号', '复审状态', '总分',
+                        '客观题', '主观题', '客观题正确数', '客观题总数',
                         'OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
         
         headers = list(final_data.keys())
@@ -1029,6 +1050,9 @@ class App(ctk.CTk):
         json_path = os.path.join(reports_dir, f"{filename_prefix}.json")
         # Add metadata to JSON for easier loading
         data_to_save = data.copy()
+        data_to_save['original_filename'] = original_filename
+        data_to_save['db_student_info'] = db_student_info
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
             
         # Calculate objective question statistics
@@ -1042,11 +1066,20 @@ class App(ctk.CTk):
             obj_correct_count = int(obj_score_sum / 3) if obj_score_sum > 0 else 0
             obj_total_count = 16  # Default assumption
             
+        # Calculate Subjective Score Sum
+        subj_score_sum = data.get('total_score', 0) - obj_score_sum
+        if subj_score_sum < 0: subj_score_sum = 0
+        
+        # Determine Review Status
+        review_status = "已复审" if data.get('review_count', 0) > 0 else "自动"
+            
         summary_data = {
             '考场': exam_room, '座号': seat_no, '班级': db_student_info.get('class', '未知'), 
             '姓名': db_student_info.get('name', '未知'), '考号': db_student_info.get('id', '未知'),
+            '复审状态': review_status,
             '总分': data.get('total_score', 0),
             '客观题': obj_score_sum,
+            '主观题': subj_score_sum,
             '客观题正确数': obj_correct_count,
             '客观题总数': obj_total_count,
             'OCR姓名': data.get('ocr_name', ''), 'OCR班级': data.get('ocr_class', ''),
