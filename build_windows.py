@@ -20,7 +20,10 @@ args = [
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
     '--hidden-import=PIL._tkinter_finder',
+    '--hidden-import=google.generativeai',
+    '--hidden-import=google.ai.generativelanguage',
     '--collect-all=customtkinter',
+    '--collect-all=google.generativeai',
     '--collect-binaries=PIL',
     # Windows-specific optimizations
     '--exclude-module=tkinter.test',
