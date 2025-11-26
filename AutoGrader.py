@@ -1242,6 +1242,10 @@ class App(ctk.CTk):
             md += f"- **OCR Recognition**:\n"
             md += f"  - Name: {ocr_name}\n"
             md += f"  - Class: {ocr_class}\n"
+            md += f"  - Room: {ocr_room}\n"
+            md += f"  - Seat: {ocr_seat}\n"
+            md += f"  - Written ID: {ocr_id_written}\n"
+            md += f"  - Filled ID: {ocr_id_filled}\n"
         else:
             md += f"# 📝 阅卷报告\n\n"
             md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
@@ -1250,6 +1254,25 @@ class App(ctk.CTk):
             md += f"- **OCR识别**:\n"
             md += f"  - 姓名: {ocr_name}\n"
             md += f"  - 班级: {ocr_class}\n"
+            md += f"  - 考场: {ocr_room}\n"
+            md += f"  - 座号: {ocr_seat}\n"
+            md += f"  - 手写考号: {ocr_id_written}\n"
+            md += f"  - 填涂考号: {ocr_id_filled}\n"
+
+        # --- Score Summary ---
+        subj_score_sum = total_score - obj_score_sum
+        if subj_score_sum < 0: subj_score_sum = 0
+        
+        if is_english:
+            md += f"\n## 📊 Score Summary\n"
+            md += f"| Total Score | Objective | Subjective |\n"
+            md += f"| :---: | :---: | :---: |\n"
+            md += f"| **{total_score}** | {obj_score_sum} | {subj_score_sum} |\n\n"
+        else:
+            md += f"\n## 📊 成绩汇总\n"
+            md += f"| 总分 | 客观题 | 主观题 |\n"
+            md += f"| :---: | :---: | :---: |\n"
+            md += f"| **{total_score}** | {obj_score_sum} | {subj_score_sum} |\n\n"
         
         # --- 1. Objective Questions ---
         obj_correct_count = len([x for x in objective_q if x.get('score', 0) > 0])
