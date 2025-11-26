@@ -1304,6 +1304,13 @@ class App(ctk.CTk):
                 _, _, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
                 
                 total_score = data.get('total_score', 0)
+                try:
+                    total_score = float(total_score)
+                    if total_score.is_integer():
+                        total_score = int(total_score)
+                except:
+                    total_score = 0
+                    
                 subj_score_sum = total_score - obj_score_sum
                 if subj_score_sum < 0: subj_score_sum = 0
                 
