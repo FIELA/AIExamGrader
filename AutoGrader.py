@@ -225,7 +225,7 @@ class App(ctk.CTk):
         self.sidebar_frame = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color=(Theme.BG_LIGHT, Theme.BG_DARK))
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_propagate(False) # Prevent resizing based on content
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid_rowconfigure(20, weight=1) # Push content to top
 
         # Logo
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=self.t("logo"), font=ctk.CTkFont(size=20, weight="bold"))
