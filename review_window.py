@@ -906,18 +906,17 @@ class ReviewWindow(ctk.CTkToplevel):
             card = ctk.CTkFrame(grid_frame, border_width=1, border_color="gray50")
             card.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
-            # Q ID (Chinese style with 顿号)
-            ctk.CTkLabel(card, text=f"{q_id}、", font=("Arial", 10, "bold")).pack(pady=(2,0))
+            # Q ID (Color coded, no punctuation)
+            ctk.CTkLabel(card, text=f"{q_id}", font=("Arial", 12, "bold"), text_color=score_color).pack(pady=(5,0))
             
             # Dropdown for Student Answer
             answer_options = ["A", "B", "C", "D", "-"]
             combo = ctk.CTkComboBox(card, values=answer_options, width=50, height=28, 
                                    command=lambda choice, q=q_id: self.on_obj_answer_change(q, choice))
             combo.set(stu_ans)
-            combo.pack(pady=2)
+            combo.pack(pady=(2, 5))
             
-            # Score Display (number only, no "pts")
-            ctk.CTkLabel(card, text=f"{score}", font=("Arial", 11, "bold"), text_color=score_color).pack(pady=(0,2))
+            # Score Display REMOVED as requested
 
         if show_buttons:
             self.add_step_buttons(parent)
