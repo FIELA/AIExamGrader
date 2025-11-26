@@ -1052,6 +1052,8 @@ class App(ctk.CTk):
         else:
             # Default to Grade_Summary.csv for new files (more standard)
             csv_path = path_en
+            
+        csv_filename = os.path.basename(csv_path)
         
         # Header Mappings
         header_map = {
