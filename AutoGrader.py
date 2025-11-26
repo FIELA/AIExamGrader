@@ -287,8 +287,17 @@ class App(ctk.CTk):
         self.combo_model.set("gemini-2.5-pro-maxthinking")
         self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12))
         
-        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_check_model"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
-        self.btn_check_model.grid(row=14, column=0, padx=16, pady=(8, 16))
+        # Model Actions Frame
+        self.model_action_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.model_action_frame.grid(row=14, column=0, padx=16, pady=(8, 16), sticky="ew")
+        self.model_action_frame.grid_columnconfigure(0, weight=1)
+        self.model_action_frame.grid_columnconfigure(1, weight=1)
+        
+        self.btn_get_models = ctk.CTkButton(self.model_action_frame, text=self.t("btn_get_models"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_get_models.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        
+        self.btn_test_connection = ctk.CTkButton(self.model_action_frame, text=self.t("btn_test_connection"), command=self.test_connection, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
+        self.btn_test_connection.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -584,7 +593,8 @@ class App(ctk.CTk):
         self.lbl_base.configure(text=self.t("lbl_base"))
         self.lbl_provider.configure(text=self.t("lbl_provider"))
         self.lbl_model.configure(text=self.t("lbl_model"))
-        self.btn_check_model.configure(text=self.t("btn_check_model"))
+        self.btn_get_models.configure(text=self.t("btn_get_models"))
+        self.btn_test_connection.configure(text=self.t("btn_test_connection"))
         
         self.lbl_resources.configure(text=self.t("lbl_resources"))
         self.btn_rubric.configure(text=self.t("btn_rubric"))
@@ -635,7 +645,7 @@ class App(ctk.CTk):
         if not api_key:
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
-        self.btn_check_model.configure(state="disabled", text=self.t("checking"))
+        self.btn_get_models.configure(state="disabled", text=self.t("checking"))
         def run_check():
             try:
                 engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get())
@@ -645,8 +655,39 @@ class App(ctk.CTk):
                 err = str(e)
                 self.after(0, lambda: messagebox.showerror(self.t("title_check_failed"), err))
             finally:
-                self.after(0, lambda: self.btn_check_model.configure(state="normal", text=self.t("btn_check_model")))
+                self.after(0, lambda: self.btn_get_models.configure(state="normal", text=self.t("btn_get_models")))
         threading.Thread(target=run_check, daemon=True).start()
+
+    def test_connection(self):
+        """Test API connection with current settings"""
+        api_key = getattr(self, "current_api_key", self.entry_key.get())
+        if not api_key:
+            messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
+            return
+            
+        self.btn_test_connection.configure(state="disabled", text=self.t("checking"))
+        
+        def run_test():
+            try:
+                engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+                
+                # Simple generation test
+                if engine.provider == "OpenAI":
+                    engine.client.chat.completions.create(
+                        model=engine.model_name,
+                        messages=[{"role": "user", "content": "Hi"}],
+                        max_tokens=1
+                    )
+                elif engine.provider == "Gemini":
+                    engine.gemini_model.generate_content("Hi")
+                
+                self.after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_test_success")))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_test_failed", error=str(e))))
+            finally:
+                self.after(0, lambda: self.btn_test_connection.configure(state="normal", text=self.t("btn_test_connection")))
+        
+        threading.Thread(target=run_test, daemon=True).start()
 
     def update_model_list(self, models):
         if not models: return

@@ -202,7 +202,12 @@ TRANSLATIONS = {
         "log_req_received": "📥 标准答案分析请求 {index} 已收到回复",
         "log_req_all_received": "✅ 已收到全部标准答案分析请求 ({count}/3)",
         "log_consolidation_sent": "📤 整合分析请求已发出",
-        "log_consolidation_received": "📥 整合分析请求已收到回复"
+        "log_consolidation_received": "📥 整合分析请求已收到回复",
+        
+        "btn_get_models": "获取模型列表",
+        "btn_test_connection": "检查可用性",
+        "msg_test_success": "连接成功！模型可用。",
+        "msg_test_failed": "连接失败: {error}"
     },
     "EN": {
         "app_title": "AI Exam Grader",
@@ -406,6 +411,11 @@ TRANSLATIONS = {
         "log_req_received": "📥 Answer key analysis request {index} received",
         "log_req_all_received": "✅ Received all answer key analysis responses ({count}/3)",
         "log_consolidation_sent": "📤 Consolidation analysis request sent",
-        "log_consolidation_received": "📥 Consolidation analysis response received"
+        "log_consolidation_received": "📥 Consolidation analysis response received",
+        
+        "btn_get_models": "Get Models",
+        "btn_test_connection": "Test Connection",
+        "msg_test_success": "Connection successful! Model is available.",
+        "msg_test_failed": "Connection failed: {error}"
     }
 }
