@@ -378,8 +378,8 @@ class ReviewWindow(ctk.CTkToplevel):
         self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text=self.t("lbl_review_details"))
         self.subj_scroll.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Enable mouse wheel scrolling
-        self.enable_mousewheel_scroll(self.subj_scroll)
+        # Enable global mouse wheel scrolling
+        self.setup_global_scroll()
 
     # --- Navigation Methods ---
     def next_student(self):
@@ -1683,37 +1683,52 @@ class ReviewWindow(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error saving progress: {e}")
 
-    def enable_mousewheel_scroll(self, scrollable_frame):
-        """Enable mouse wheel scrolling for CTkScrollableFrame"""
-        def on_mousewheel(event):
+    def setup_global_scroll(self):
+        """Bind global mousewheel events to handle scrolling based on hover"""
+        # Bind to the main window
+        self.window.bind("<MouseWheel>", self.on_global_mousewheel)
+        # Linux support
+        self.window.bind("<Button-4>", self.on_global_mousewheel)
+        self.window.bind("<Button-5>", self.on_global_mousewheel)
+
+    def on_global_mousewheel(self, event):
+        # Only handle if subj_scroll exists and is visible
+        if not hasattr(self, 'subj_scroll') or not self.subj_scroll.winfo_viewable():
+            return
+
+        # Check if mouse is over subj_scroll
+        x, y = self.window.winfo_pointerxy()
+        try:
+            widget = self.window.winfo_containing(x, y)
+        except Exception:
+            return
+
+        if self.is_descendant(widget, self.subj_scroll):
             try:
-                # Get the internal canvas from CTkScrollableFrame
-                canvas = scrollable_frame._parent_canvas
-                if platform.system() == "Darwin":  # macOS
+                canvas = self.subj_scroll._parent_canvas
+                if platform.system() == "Darwin":
                     canvas.yview_scroll(int(-1 * (event.delta)), "units")
-                else:  # Windows/Linux
+                elif event.num == 4:
+                    canvas.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    canvas.yview_scroll(1, "units")
+                else:
                     canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                return "break" # Stop propagation
             except Exception:
                 pass
-        
-        def bind_to_mousewheel(event):
-            scrollable_frame._parent_canvas.bind_all("<MouseWheel>", on_mousewheel)
-            
-        def unbind_from_mousewheel(event):
-            scrollable_frame._parent_canvas.unbind_all("<MouseWheel>")
-        
-        # Bind to the main frame
-        scrollable_frame.bind("<Enter>", bind_to_mousewheel)
-        scrollable_frame.bind("<Leave>", unbind_from_mousewheel)
-        
-        # Bind to internal components if accessible
-        if hasattr(scrollable_frame, "_parent_canvas"):
-            scrollable_frame._parent_canvas.bind("<Enter>", bind_to_mousewheel)
-            scrollable_frame._parent_canvas.bind("<Leave>", unbind_from_mousewheel)
-            
-        if hasattr(scrollable_frame, "_parent_frame"):
-            scrollable_frame._parent_frame.bind("<Enter>", bind_to_mousewheel)
-            scrollable_frame._parent_frame.bind("<Leave>", unbind_from_mousewheel)
+
+    def is_descendant(self, widget, ancestor):
+        """Check if widget is a descendant of ancestor"""
+        if not widget: return False
+        curr = widget
+        while curr:
+            if curr == ancestor: return True
+            try:
+                curr = curr.master
+            except AttributeError:
+                break
+        return False
 
     def on_close(self):
         # Auto-save on close
