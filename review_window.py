@@ -853,35 +853,120 @@ class ReviewWindow(ctk.CTkToplevel):
         details = self.current_data.get('details', [])
         obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
         
+        # Sort by Question ID (numeric)
+        def get_sort_key(item):
+            qid = str(item.get('question_id', '0'))
+            import re
+            m = re.match(r"(\d+)", qid)
+            return int(m.group(1)) if m else 999
+        
+        obj_items.sort(key=get_sort_key)
+        
+        # --- Summary Header ---
         if obj_items:
             obj_score = sum(x.get('score', 0) for x in obj_items)
             obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
         else:
             obj_score = self.current_data.get('legacy_obj_score', 0)
-            # Estimate correct count from score (assuming 3 pts per Q)
             obj_correct = int(obj_score / 3)
+            
+        header_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 10))
         
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x")
+        ctk.CTkLabel(header_frame, text=self.t("lbl_correct_count")).pack(side="left")
+        ctk.CTkLabel(header_frame, text=f"{obj_correct}", font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
-        # --- Logic: 16 Qs * 3 Pts ---
-        ctk.CTkLabel(frame, text=self.t("lbl_correct_count")).pack(side="left")
+        ctk.CTkLabel(header_frame, text=self.t("lbl_total_score")).pack(side="left", padx=(20, 0))
+        ctk.CTkLabel(header_frame, text=f"{obj_score}", font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
-        self.var_obj_count = tk.StringVar(value=str(obj_correct))
-        self.combo_obj_count = ctk.CTkComboBox(frame, values=[str(i) for i in range(17)], width=70, variable=self.var_obj_count, command=self.on_obj_count_change)
-        self.combo_obj_count.pack(side="left", padx=10)
+        # --- Grid Layout for Questions ---
+        grid_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        grid_frame.pack(fill="both", expand=True)
         
-        ctk.CTkLabel(frame, text=self.t("lbl_total_score")).pack(side="left", padx=(20, 0))
-        
-        self.var_obj_score = tk.StringVar(value=str(obj_score))
-        self.entry_obj_score = ctk.CTkEntry(frame, width=60, textvariable=self.var_obj_score)
-        self.entry_obj_score.pack(side="left", padx=10)
-        
-        # Bind Score Entry to update Count
-        self.entry_obj_score.bind("<KeyRelease>", self.on_obj_score_change)
-        
+        cols = 5
+        for i, item in enumerate(obj_items):
+            row = i // cols
+            col = i % cols
+            
+            q_id = item.get('question_id', '?')
+            stu_ans = item.get('student_answer', '')
+            score = item.get('score', 0)
+            
+            # Get Standard Answer
+            std_ans = item.get('standard_answer', '')
+            if hasattr(self.parent_app, 'answer_key') and self.parent_app.answer_key:
+                std_ans = self.parent_app.answer_key.get(q_id, std_ans)
+            
+            # Color code
+            bg_color = "#106A38" if score > 0 else "#DC2626" # Green/Red
+            if score == 0 and not stu_ans: bg_color = "gray"
+            
+            card = ctk.CTkFrame(grid_frame, border_width=1, border_color="gray50")
+            card.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
+            
+            # Q ID
+            ctk.CTkLabel(card, text=f"Q{q_id}", font=("Arial", 10, "bold")).pack(pady=(2,0))
+            
+            # Entry for Student Answer
+            entry = ctk.CTkEntry(card, width=40, justify="center")
+            entry.insert(0, stu_ans)
+            entry.pack(pady=2)
+            entry.bind("<FocusOut>", lambda e, q=q_id, ent=entry: self.on_obj_answer_change(q, ent.get()))
+            entry.bind("<Return>", lambda e, q=q_id, ent=entry: self.on_obj_answer_change(q, ent.get()))
+            
+            # Standard Answer Display
+            ctk.CTkLabel(card, text=f"Std: {std_ans}", font=("Arial", 10), text_color="gray70").pack(pady=(0,2))
+            
+            # Score Indicator (Small dot or text)
+            ctk.CTkLabel(card, text=f"{score} pts", font=("Arial", 10), text_color=bg_color).pack(pady=(0,2))
+
         if show_buttons:
             self.add_step_buttons(parent)
+
+    def on_obj_answer_change(self, q_id, new_ans):
+        new_ans = new_ans.strip().upper()
+        details = self.current_data.get('details', [])
+        
+        changed = False
+        for item in details:
+            if str(item.get('question_id')) == str(q_id):
+                old_ans = item.get('student_answer', '')
+                if old_ans != new_ans:
+                    item['student_answer'] = new_ans
+                    item['manual_override'] = True # Flag as manually modified
+                    
+                    # Recalculate Score locally
+                    std_ans = item.get('standard_answer', '')
+                    if hasattr(self.parent_app, 'answer_key') and self.parent_app.answer_key:
+                        std_ans = self.parent_app.answer_key.get(q_id, std_ans)
+                    
+                    max_score = item.get('max_score', 0)
+                    if not max_score: max_score = 3 # Default fallback
+                    
+                    if new_ans == std_ans:
+                        item['score'] = max_score
+                    else:
+                        item['score'] = 0
+                        
+                    changed = True
+                break
+        
+        if changed:
+            # Recalculate totals
+            self.recalculate_totals()
+            # Refresh UI (to update colors/scores)
+            if self.view_mode == 'image':
+                self.load_step_ui()
+            else:
+                self.load_no_image_ui()
+
+    def recalculate_totals(self):
+        details = self.current_data.get('details', [])
+        if not details: return
+        
+        sub_sum = sum(x.get('score', 0) for x in details)
+        self.current_data['total_score'] = sub_sum
+        self.update_score_display()
 
     def render_subj_step(self, step, parent, show_buttons=True):
         items = step['items']
@@ -1259,6 +1344,8 @@ class ReviewWindow(ctk.CTkToplevel):
             if old_item:
                 if old_item.get('score') != new_item.get('score'):
                     changes.append(f"Q{q_id} Score: {old_item.get('score')} -> {new_item.get('score')}")
+                if old_item.get('student_answer') != new_item.get('student_answer'):
+                    changes.append(f"Q{q_id} Answer: {old_item.get('student_answer')} -> {new_item.get('student_answer')}")
             else:
                 changes.append(f"Q{q_id} Added")
                 
