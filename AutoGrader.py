@@ -1316,8 +1316,6 @@ class App(ctk.CTk):
                 except:
                     obj_score_sum = 0
                     
-                print(f"DEBUG: total={total_score}({type(total_score)}), obj={obj_score_sum}({type(obj_score_sum)})")
-                
                 if not isinstance(total_score, (int, float)):
                     total_score = 0
                 if not isinstance(obj_score_sum, (int, float)):
@@ -1815,6 +1813,9 @@ class App(ctk.CTk):
                         item['score'] = new_score
                         log_entries.append(f"Q{qid}: {old_score} → {new_score}")
                         changed = True
+                    
+                    # Update standard_answer in JSON to reflect new answer key
+                    item['standard_answer'] = std_ans
                 
                 if changed:
                     # Recalculate Total
