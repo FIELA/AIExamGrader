@@ -1231,29 +1231,70 @@ class App(ctk.CTk):
             sub_scores_dict[f"{main_id}"] = main_total
 
         md = ""
-        md += f"# 📝 阅卷报告\n\n"
-        md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
-        md += f"- **考场座位**: {exam_room}考场 {seat_no}号\n"
-        md += f"- **信息校验**: {consistency_note} (匹配项数: {matches})\n"
-        md += f"- **OCR识别**:\n"
-        md += f"  - 姓名: {ocr_name}\n"
-        md += f"  - 班级: {ocr_class}\n"
-        md += f"  - 考场: {ocr_room} | 座号: {ocr_seat}\n"
-        md += f"  - 考号: 手写[{ocr_id_written}] | 填涂[{ocr_id_filled}]\n\n"
-        md += f"## 🏆 总分: {total_score}\n\n"
+        is_english = (self.current_lang == "EN")
+        
+        # Report header - bilingual
+        if is_english:
+            md += f"# 📝 Grading Report\n\n"
+            md += f"- **Basic Info**: Class {class_no} | {student_name} | {student_id}\n"
+            md += f"- **Exam Seat**: Room {exam_room}, Seat {seat_no}\n"
+            md += f"- **Info Check**: {consistency_note} (Matches: {matches})\n"
+            md += f"- **OCR Recognition**:\n"
+            md += f"  - Name: {ocr_name}\n"
+            md += f"  - Class: {ocr_class}\n"
+        else:
+            md += f"# 📝 阅卷报告\n\n"
+            md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
+            md += f"- **考场座位**: {exam_room}考场 {seat_no}号\n"
+            md += f"- **信息校验**: {consistency_note} (匹配项数: {matches})\n"
+            md += f"- **OCR识别**:\n"
+            md += f"  - 姓名: {ocr_name}\n"
+            md += f"  - 班级: {ocr_class}\n"
         
         # --- 1. Objective Questions ---
         obj_correct_count = len([x for x in objective_q if x.get('score', 0) > 0])
         obj_total_count = len(objective_q)
         
-        md += "### 1. 客观题\n"
-        md += f"**得分**: {obj_score_sum} (正确: {obj_correct_count}/{obj_total_count})\n\n"
+        if is_english:
+            md += "### 1. Objective Questions\n"
+            md += f"**Score**: {obj_score_sum} (Correct: {obj_correct_count}/{obj_total_count})\n\n"
+        else:
+            md += "### 1. 客观题\n"
+            md += f"**得分**: {obj_score_sum} (正确: {obj_correct_count}/{obj_total_count})\n\n"
         
+        # Helper function to pad label to fixed character length
+        def pad_to_length(text, target_length):
+            """Pad text with spaces to reach target character length"""
+            current_length = len(text)
+            if current_length >= target_length:
+                return text
+            padding = target_length - current_length
+            left_pad = padding // 2
+            right_pad = padding - left_pad
+            return " " * left_pad + text + " " * right_pad
+
         # Create one continuous table with groups of 5
         if objective_q:
             group_size = 5
             
-            # Determine max columns needed
+            # Determine labels and widths based on language
+            is_english = (self.current_lang == "EN")
+            
+            if is_english:
+                # English labels - pad to 16 characters
+                label_length = 16
+                label_q_id = pad_to_length("Question ID", label_length)
+                label_s_ans = pad_to_length("Student Answer", label_length)
+                label_result = pad_to_length("Result", label_length)
+                label_c_ans = pad_to_length("Correct Answer", label_length)
+            else:
+                # Chinese labels - pad to 8 characters
+                label_length = 8
+                label_q_id = pad_to_length("题号", label_length)
+                label_s_ans = pad_to_length("考生答案", label_length)
+                label_result = pad_to_length("结果", label_length)
+                label_c_ans = pad_to_length("正确答案", label_length)
+            
             max_cols = min(group_size, len(objective_q))
             
             # Process groups
@@ -1262,82 +1303,62 @@ class App(ctk.CTk):
                 
                 # For first group, create table header with question numbers
                 if group_idx == 0:
-                    md += "| 题号 | "
-                    md += " | ".join([str(item.get('question_id')) for item in group])
-                    if len(group) < max_cols:
-                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                    md += " |\n"
-                    
-                    # Table separator
-                    md += "|---|" + "---|" * max_cols + "\n"
+                    # Header Row
+                    md += f"| {label_q_id} | " + " | ".join([str(item.get('question_id')).center(4) for item in group]) + " |\n"
+                    # Separator
+                    md += "|" + "---|" * (len(group) + 1) + "\n"
                 else:
-                    # Add blank separator row between groups
-                    md += "|  | " + " | ".join([" "] * len(group))
-                    if len(group) < max_cols:
-                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                    md += " |\n"
-                    
+                    # Blank separator row between groups
+                    md += "| " + " " * label_length + " | " + " | ".join([" " * 4] * len(group)) + " |\n"
                     # Row: Question numbers for subsequent groups
-                    md += "| 题号 | "
-                    md += " | ".join([str(item.get('question_id')) for item in group])
-                    if len(group) < max_cols:
-                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                    md += " |\n"
+                    md += f"| {label_q_id} | " + " | ".join([str(item.get('question_id')).center(4) for item in group]) + " |\n"
                 
                 # Row: Student answers
-                md += "| 考生答案 | "
-                md += " | ".join([str(item.get('student_answer', '')) for item in group])
-                if len(group) < max_cols:
-                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                md += " |\n"
-                
-                # Row: Correct answers
-                md += "| 正确答案 | "
-                md += " | ".join([str(item.get('standard_answer', '')) for item in group])
-                if len(group) < max_cols:
-                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                md += " |\n"
+                md += f"| {label_s_ans} | " + " | ".join([str(item.get('student_answer', '')).center(4) for item in group]) + " |\n"
                 
                 # Row: Results
-                md += "| 结果 | "
-                results = []
-                for item in group:
-                    score = item.get('score', 0)
-                    result_icon = "✅" if score > 0 else "❌"
-                    results.append(result_icon)
-                md += " | ".join(results)
-                if len(group) < max_cols:
-                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
-                md += " |\n"
+                results = [f"{'✅' if item.get('score', 0) > 0 else '❌'}".center(4) for item in group]
+                md += f"| {label_result} | " + " | ".join(results) + " |\n"
+
+                # Row: Correct answers
+                md += f"| {label_c_ans} | " + " | ".join([str(item.get('standard_answer', '')).center(4) for item in group]) + " |\n"
             
             md += "\n"
         
         # --- 2. Subjective Questions ---
-        md += "\n### 2. 主观题\n"
+        if is_english:
+            md += "\n### 2. Subjective Questions\n"
+        else:
+            md += "\n### 2. 主观题\n"
+            
         sorted_keys = sorted(subjective_q.keys(), key=lambda x: int(x) if x.isdigit() else 999)
         
         for main_id in sorted_keys:
-            sub_items = subjective_q[main_id]
-            total_main = sum([x.get('score', 0) for x in sub_items])
-            md += f"\n#### 第 {main_id} 题 (总: {total_main})\n"
-            for sub in sub_items:
-                q_id = sub.get('question_id')
-                score = sub.get('score', 0)
-                max_score = sub.get('max_score')
-                student_text = sub.get('student_text', '')
-                
-                scoring_points = sub.get('scoring_points', '')
-                error_analysis = sub.get('error_analysis', '')
-                # Fallback to old fields if new ones are missing
-                if not scoring_points and not error_analysis:
-                    scoring_points = sub.get('analysis', '') or sub.get('reasoning', '')
+            items = subjective_q[main_id]
+            main_total = sub_scores_dict.get(f"{main_id}", 0)
+            
+            for item in items:
+                q_id = item.get('question_id', '')
+                student_answer = item.get('student_answer', '')
+                student_text = student_answer if isinstance(student_answer, str) else str(student_answer)
+                max_score = item.get('max_score', 0)
+                score = item.get('score', 0)
+                scoring_points = item.get('scoring_points', '')
+                error_analysis = item.get('error_analysis', '')
                 
                 md += f"- **{q_id}**: {score}/{max_score}\n"
-                md += f"  - **考生答案**: {student_text}\n"
-                if scoring_points:
-                    md += f"  - **得分点**: {scoring_points}\n"
-                if error_analysis:
-                    md += f"  - **失分原因**: {error_analysis}\n"
+                if is_english:
+                    md += f"  - **Student Answer**: {student_text}\n"
+                    if scoring_points:
+                        md += f"  - **Scoring Points**: {scoring_points}\n"
+                    if error_analysis:
+                        md += f"  - **Analysis**: {error_analysis}\n"
+                else:
+                    md += f"  - **考生答案**: {student_text}\n"
+                    if scoring_points:
+                        md += f"  - **得分点**: {scoring_points}\n"
+                    if error_analysis:
+                        md += f"  - **失分原因**: {error_analysis}\n"
 
         return md, sub_scores_dict, consistency_note, matches, obj_score_sum
 
