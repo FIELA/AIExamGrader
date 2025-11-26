@@ -153,6 +153,9 @@ TRANSLATIONS = {
         "log_reverifying": "🔄 正在重新校验缺失文件...",
         "log_regen_csv": "🔄 正在重新生成汇总 CSV...",
         "log_verify_counts": "📊 正在校验最终数量...",
+        "log_rubric_loaded": "📄 评分标准已加载。",
+        "log_extracting_answers": "🧠 正在从评分标准中提取标准答案...",
+        "log_answers_extracted": "✅ 已提取 {count} 个标准答案。",
         
         "msg_no_profile_delete": "未选择要删除的配置",
         "msg_confirm_delete": "确定要删除配置 '{profile}' 吗？",
@@ -343,6 +346,9 @@ TRANSLATIONS = {
         "log_reverifying": "🔄 Re-verifying missing files...",
         "log_regen_csv": "🔄 Regenerating Summary CSV...",
         "log_verify_counts": "📊 Verifying final counts...",
+        "log_rubric_loaded": "📄 Rubric loaded.",
+        "log_extracting_answers": "🧠 Extracting standard answers from rubric...",
+        "log_answers_extracted": "✅ Extracted {count} standard answers.",
         
         "msg_no_profile_delete": "No profile selected to delete",
         "msg_confirm_delete": "Delete profile '{profile}'?",

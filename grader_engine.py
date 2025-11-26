@@ -107,7 +107,6 @@ class AIGraderEngine:
         对于**主观题**，`details` 中必须包含：
         - `scoring_points`: 字符串，列出得分点 (例如: "提到洋流交汇(+2)")
         - `error_analysis`: 字符串，分析失分原因 (例如: "未提到地形影响")
-        - `standard_answer`: 字符串，该小题的正确答案/参考答案
         
         JSON 结构示例：
         {{
@@ -126,8 +125,7 @@ class AIGraderEngine:
                     "score": 2, 
                     "max_score": 3,
                     "scoring_points": "提到寒暖流交汇得2分",
-                    "error_analysis": "未提到饵料丰富，扣1分",
-                    "standard_answer": "寒暖流交汇带来丰富饵料..."
+                    "error_analysis": "未提到饵料丰富，扣1分"
                 }}
             ], 
             "total_score": 85
@@ -240,3 +238,41 @@ class AIGraderEngine:
         except Exception as e:
             return descriptions[0] # Fallback
 
+    def extract_answer_key(self, rubric_text):
+        """
+        Extracts standard answers from the rubric text.
+        Returns a dictionary {question_id: standard_answer}.
+        """
+        prompt = f"""
+        请仔细阅读以下【评分细则】，提取出所有题目的【标准答案】。
+        
+        --- 评分细则 ---
+        {rubric_text}
+        --- 结束 ---
+        
+        请输出一个 JSON 对象，键为题号，值为标准答案/参考答案。
+        对于客观题，值为选项字母（如 "A"）。
+        对于主观题，值为参考答案的文本摘要。
+        
+        JSON 示例：
+        {{
+            "1": "A",
+            "2": "B",
+            "17(1)": "寒暖流交汇带来丰富饵料",
+            "17(2)": "位于北半球，气旋逆时针旋转"
+        }}
+        """
+        
+        try:
+            if self.provider == "OpenAI":
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return json.loads(clean_json_string(response.choices[0].message.content))
+            elif self.provider == "Gemini":
+                response = self.gemini_model.generate_content(prompt)
+                return json.loads(clean_json_string(response.text))
+        except Exception as e:
+            print(f"Error extracting answer key: {e}")
+            return {}

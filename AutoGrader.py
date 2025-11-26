@@ -43,7 +43,10 @@ class App(ctk.CTk):
         self.processing = False
         self.write_lock = threading.RLock()  # Use RLock for reentrant locking
         self.completed_count = 0
+        self.completed_count = 0
         self.total_files = 0
+        
+        self.answer_key = {} # Store standard answers locally
         
         # Control events
         self.pause_event = threading.Event()
@@ -666,6 +669,10 @@ class App(ctk.CTk):
         if path:
             self.rubric_path = path
             self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
+            
+            # Parse rubric for answer key
+            threading.Thread(target=self.parse_rubric_for_answers, daemon=True).start()
+            
             self.check_ready_and_verify()
 
     def select_folder(self):
@@ -1015,7 +1022,8 @@ class App(ctk.CTk):
             self.pause_event.clear()
             self.btn_pause.configure(text=self.t("btn_resume"), fg_color="#106A38")
             self.log(self.t("msg_paused"))
-        else:
+            
+        else: # This was the original else block, the user's snippet had a syntax error here.
             self.pause_event.set()
             self.btn_pause.configure(text=self.t("btn_pause"), fg_color="#D97706")
             self.log(self.t("msg_resumed"))
@@ -1359,8 +1367,10 @@ class App(ctk.CTk):
                     ea_text = error_analysis if error_analysis else "None"
                     md += f"  - **Analysis**: {ea_text}\n"
 
-                    if item.get('standard_answer'):
-                         md += f"  - **Correct Answer**: {item.get('standard_answer')}\n"
+                    # Get standard answer from local key or item
+                    std_ans = self.answer_key.get(q_id) or item.get('standard_answer')
+                    if std_ans:
+                         md += f"  - **Correct Answer**: {std_ans}\n"
                 else:
                     md += f"  - **考生答案**: {student_text}\n"
                     # Always show Scoring Points
@@ -1371,12 +1381,42 @@ class App(ctk.CTk):
                     ea_text = error_analysis if error_analysis else "无"
                     md += f"  - **失分原因**: {ea_text}\n"
                     
-                    if item.get('standard_answer'):
-                         md += f"  - **正确答案**: {item.get('standard_answer')}\n"
+                    # Get standard answer from local key or item
+                    std_ans = self.answer_key.get(q_id) or item.get('standard_answer')
+                    if std_ans:
+                         md += f"  - **正确答案**: {std_ans}\n"
                 
                 md += "\n"
 
         return md, sub_scores_dict, consistency_note, matches, obj_score_sum
+
+    def parse_rubric_for_answers(self):
+        """
+        Parses the loaded rubric to extract standard answers.
+        """
+        if not self.rubric_path: return
+        
+        try:
+            with open(self.rubric_path, 'r', encoding='utf-8') as f:
+                rubric_text = f.read()
+            
+            self.log(self.t("log_extracting_answers"))
+            
+            # Initialize engine if not already done (might be needed if checking models hasn't run)
+            # But usually engine is created in start_grading. 
+            # Here we create a temporary one or check if we can reuse logic.
+            # We need api_key and base_url.
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            if not api_key: return
+            
+            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            self.answer_key = engine.extract_answer_key(rubric_text)
+            
+            count = len(self.answer_key)
+            self.log(self.t("log_answers_extracted", count=count))
+            
+        except Exception as e:
+            self.log(f"Failed to extract answer key: {e}")
 
     def save_markdown(self, data, original_filename, db_student_info):
         exam_room = db_student_info.get('room', '未知')
