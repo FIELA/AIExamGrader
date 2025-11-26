@@ -18,20 +18,20 @@ class StandardAnswerReviewDialog(ctk.CTkToplevel):
         
         # Layout
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(3, weight=1)
         
         # 1. Report Section
         self.lbl_report = ctk.CTkLabel(self, text="一致性分析报告 (Consistency Report):", font=ctk.CTkFont(size=14, weight="bold"))
-        self.lbl_report.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 5))
+        self.lbl_report.grid(row=0, column=0, sticky="w", padx=20, pady=(10, 2))
         
-        self.txt_report = ctk.CTkTextbox(self, height=100)
-        self.txt_report.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.txt_report = ctk.CTkTextbox(self, height=60)
+        self.txt_report.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 5))
         self.txt_report.insert("1.0", report_text)
         self.txt_report.configure(state="disabled")
         
         # 2. JSON Editor Section
         self.lbl_json = ctk.CTkLabel(self, text="最终标准答案 (Final Answer Key - Editable):", font=ctk.CTkFont(size=14, weight="bold"))
-        self.lbl_json.grid(row=2, column=0, sticky="w", padx=20, pady=(10, 5))
+        self.lbl_json.grid(row=2, column=0, sticky="w", padx=20, pady=(5, 2))
         
         self.txt_json = ctk.CTkTextbox(self)
         self.txt_json.grid(row=3, column=0, sticky="nsew", padx=20, pady=(0, 20))
