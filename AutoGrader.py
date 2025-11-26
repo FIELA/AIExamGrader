@@ -1038,8 +1038,20 @@ class App(ctk.CTk):
         import csv
         
         is_en = (self.current_lang == "EN")
-        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-        csv_path = os.path.join(self.exam_folder, csv_filename)
+        
+        # Smart Filename Selection: Prioritize existing files
+        csv_en = "Grade_Summary.csv"
+        csv_cn = "成绩汇总表.csv"
+        path_en = os.path.join(self.exam_folder, csv_en)
+        path_cn = os.path.join(self.exam_folder, csv_cn)
+        
+        if os.path.exists(path_en):
+            csv_path = path_en
+        elif os.path.exists(path_cn):
+            csv_path = path_cn
+        else:
+            # Default to Grade_Summary.csv for new files (more standard)
+            csv_path = path_en
         
         # Header Mappings
         header_map = {
