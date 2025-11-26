@@ -377,6 +377,9 @@ class ReviewWindow(ctk.CTkToplevel):
         
         self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text=self.t("lbl_review_details"))
         self.subj_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Enable mouse wheel scrolling
+        self.enable_mousewheel_scroll(self.subj_scroll)
 
     # --- Navigation Methods ---
     def next_student(self):
@@ -1680,6 +1683,20 @@ class ReviewWindow(ctk.CTkToplevel):
                 json.dump(data, f)
         except Exception as e:
             print(f"Error saving progress: {e}")
+
+    def enable_mousewheel_scroll(self, scrollable_frame):
+        """Enable mouse wheel scrolling for CTkScrollableFrame"""
+        def on_mousewheel(event):
+            # Get the internal canvas from CTkScrollableFrame
+            canvas = scrollable_frame._parent_canvas
+            if platform.system() == "Darwin":  # macOS
+                canvas.yview_scroll(int(-1 * (event.delta)), "units")
+            else:  # Windows/Linux
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        # Bind to the scrollable frame and its canvas
+        scrollable_frame.bind("<Enter>", lambda e: scrollable_frame._parent_canvas.bind_all("<MouseWheel>", on_mousewheel))
+        scrollable_frame.bind("<Leave>", lambda e: scrollable_frame._parent_canvas.unbind_all("<MouseWheel>"))
 
     def on_close(self):
         # Auto-save on close

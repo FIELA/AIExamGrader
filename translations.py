@@ -176,7 +176,7 @@ TRANSLATIONS = {
         "btn_right": "➡ 右移",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "主观题复审", # For the specific header issue
-        'lbl_review_details': "主观题详情",
+        'lbl_review_details': "复审详情",
         'chk_absence': "确认缺考",
         'msg_csv_permission_error': "无法写入 CSV 文件。请检查文件是否被 Excel 打开，关闭后重试。",
     
@@ -371,7 +371,7 @@ TRANSLATIONS = {
         "btn_right": "➡ Right",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "Subjective Review", # For the specific header issue
-        'lbl_review_details': "Subjective Details",
+        'lbl_review_details': "Review Details",
         'chk_absence': "Confirm Absence",
         'msg_csv_permission_error': "Cannot write to CSV file. Please close it if open in Excel and try again.",
     
