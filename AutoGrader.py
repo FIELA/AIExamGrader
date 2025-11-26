@@ -1239,30 +1239,68 @@ class App(ctk.CTk):
         md += "### 1. 客观题\n"
         md += f"**得分**: {obj_score_sum} (正确: {obj_correct_count}/{obj_total_count})\n\n"
         
-        # Group objective questions by 5
-        group_size = 5
-        for group_start in range(0, len(objective_q), group_size):
-            group = objective_q[group_start:group_start + group_size]
+        # Create one continuous table with groups of 5
+        if objective_q:
+            group_size = 5
             
-            # Student answers
-            md += "**考生答案**: "
-            md += " | ".join([f"{item.get('question_id')}: {item.get('student_answer')}" for item in group])
-            md += "\n\n"
+            # Determine max columns needed
+            max_cols = min(group_size, len(objective_q))
             
-            # Correct answers
-            md += "**正确答案**: "
-            md += " | ".join([f"{item.get('question_id')}: {item.get('standard_answer')}" for item in group])
-            md += "\n\n"
+            # Process groups
+            for group_idx, group_start in enumerate(range(0, len(objective_q), group_size)):
+                group = objective_q[group_start:group_start + group_size]
+                
+                # For first group, create table header with question numbers
+                if group_idx == 0:
+                    md += "| 题号 | "
+                    md += " | ".join([str(item.get('question_id')) for item in group])
+                    if len(group) < max_cols:
+                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                    md += " |\n"
+                    
+                    # Table separator
+                    md += "|---|" + "---|" * max_cols + "\n"
+                else:
+                    # Add blank separator row between groups
+                    md += "|  | " + " | ".join([" "] * len(group))
+                    if len(group) < max_cols:
+                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                    md += " |\n"
+                    
+                    # Row: Question numbers for subsequent groups
+                    md += "| 题号 | "
+                    md += " | ".join([str(item.get('question_id')) for item in group])
+                    if len(group) < max_cols:
+                        md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                    md += " |\n"
+                
+                # Row: Student answers
+                md += "| 考生答案 | "
+                md += " | ".join([str(item.get('student_answer', '')) for item in group])
+                if len(group) < max_cols:
+                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                md += " |\n"
+                
+                # Row: Correct answers
+                md += "| 正确答案 | "
+                md += " | ".join([str(item.get('standard_answer', '')) for item in group])
+                if len(group) < max_cols:
+                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                md += " |\n"
+                
+                # Row: Results
+                md += "| 结果 | "
+                results = []
+                for item in group:
+                    score = item.get('score', 0)
+                    result_icon = "✅" if score > 0 else "❌"
+                    results.append(result_icon)
+                md += " | ".join(results)
+                if len(group) < max_cols:
+                    md += " | " + " | ".join([" "] * (max_cols - len(group)))
+                md += " |\n"
             
-            # Results
-            md += "**结果**: "
-            results = []
-            for item in group:
-                score = item.get('score', 0)
-                result_icon = "✅" if score > 0 else "❌"
-                results.append(f"{item.get('question_id')}: {result_icon}")
-            md += " | ".join(results)
-            md += "\n\n"
+            md += "\n"
         
         # --- 2. Subjective Questions ---
         md += "\n### 2. 主观题\n"
