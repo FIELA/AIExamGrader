@@ -955,17 +955,22 @@ class App(ctk.CTk):
         4. Show confirmation.
         5. Save and run.
         """
+        self.log(self.t("log_checking_layout"))
+        
         if self.template_confirmed:
+            self.log(self.t("log_layout_found"))
             callback()
             return
 
         # Try load
         self.load_layout_config()
         if self.template_confirmed:
+            self.log(self.t("log_layout_found"))
             callback()
             return
 
         # Need detection
+        self.log(self.t("log_layout_missing"))
         self.start_detection_thread(callback)
 
     def start_grading_thread(self):
@@ -976,6 +981,8 @@ class App(ctk.CTk):
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
         self.save_current_config()
+        
+        self.log(self.t("log_checking_answer_key"))
         
         # Check and generate answer key if needed (BEFORE grading)
         # Chain: Answer Key -> Layout -> Grading
@@ -990,7 +997,7 @@ class App(ctk.CTk):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         self.answer_key = json.load(f)
-                    self.log(self.t("log_answer_key_loaded"))
+                    self.log(self.t("log_answer_key_found"))
                     # Answer key exists, proceed to callback
                     callback()
                     return
@@ -998,6 +1005,7 @@ class App(ctk.CTk):
                     self.log(f"Failed to load existing answer key: {e}")
         
         # No answer key found, need to extract
+        self.log(self.t("log_answer_key_missing"))
         if not self.rubric_path:
             messagebox.showerror(self.t("title_error"), "Cannot generate answer key: no rubric loaded.")
             return

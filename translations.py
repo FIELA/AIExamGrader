@@ -148,6 +148,13 @@ TRANSLATIONS = {
         "log_move_failed": "⚠️ 无法移动 {filename}: {error}",
         "log_file_done": "✅ {filename}",
         "log_start_failed_count": "🚀 启动处理，共 {total} 张，失败文件夹中有 {failed} 张",
+        
+        "log_checking_answer_key": "🔍 正在检测标准答案配置...",
+        "log_answer_key_found": "✅ 已找到标准答案配置。",
+        "log_answer_key_missing": "⚠️ 未找到标准答案配置，开始生成...",
+        "log_checking_layout": "🔍 正在检测答题卡布局配置...",
+        "log_layout_found": "✅ 已找到答题卡布局配置。",
+        "log_layout_missing": "⚠️ 未找到答题卡布局配置，开始检测...",
         "log_retry_failed": "🔄 正在重试 {count} 个失败文件...",
         "log_grading_stats": "📊 答题卡: {ti}, JSON: {jc}, Markdown: {mc}, CSV: {cr}",
         "log_loaded_layout": "📄 已加载保存的布局配置。",
@@ -426,6 +433,13 @@ TRANSLATIONS = {
         "title_save_profile": "Save Profile",
         "msg_enter_profile_name": "Enter profile name:",
         "msg_overwrite_profile": "Overwrite current profile '{name}'?\nClick Yes to overwrite, No to save as new.",
-        "title_overwrite": "Confirm Overwrite"
+        "title_overwrite": "Confirm Overwrite",
+        
+        "log_checking_answer_key": "🔍 Checking answer key configuration...",
+        "log_answer_key_found": "✅ Answer key configuration found.",
+        "log_answer_key_missing": "⚠️ Answer key configuration not found, starting generation...",
+        "log_checking_layout": "🔍 Checking answer sheet layout configuration...",
+        "log_layout_found": "✅ Answer sheet layout configuration found.",
+        "log_layout_missing": "⚠️ Answer sheet layout configuration not found, starting detection..."
     }
 }
