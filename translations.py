@@ -159,6 +159,8 @@ TRANSLATIONS = {
         "log_answers_extracted": "✅ 已提取 {count} 个标准答案。",
         "log_answer_key_loaded": "✅ 已从文件加载标准答案。",
         "log_answer_key_saved": "💾 标准答案已保存至文件。",
+        "log_answer_key_waiting_confirm": "⏳ 标准答案等待确认...",
+        "log_answer_key_confirmed": "✅ 标准答案已确认。",
         
         "msg_no_profile_delete": "未选择要删除的配置",
         "msg_confirm_delete": "确定要删除配置 '{profile}' 吗？",
@@ -354,6 +356,8 @@ TRANSLATIONS = {
         "log_answers_extracted": "✅ Extracted {count} standard answers.",
         "log_answer_key_loaded": "✅ Loaded answer key from file.",
         "log_answer_key_saved": "💾 Answer key saved to file.",
+        "log_answer_key_waiting_confirm": "⏳ Waiting for answer key confirmation...",
+        "log_answer_key_confirmed": "✅ Answer key confirmed.",
         
         "msg_no_profile_delete": "No profile selected to delete",
         "msg_confirm_delete": "Delete profile '{profile}'?",

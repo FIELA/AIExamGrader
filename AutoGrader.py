@@ -540,8 +540,6 @@ class App(ctk.CTk):
             self.rubric_path = profile_data["rubric_path"]
             if os.path.exists(self.rubric_path):
                 self.lbl_rubric_status.configure(text=os.path.basename(self.rubric_path), text_color=("green", "lightgreen"))
-                # Parse rubric for answer key (in background)
-                threading.Thread(target=self.parse_rubric_for_answers, daemon=True).start()
         
         if "exam_folder" in profile_data and profile_data["exam_folder"]:
             self.exam_folder = profile_data["exam_folder"]
@@ -674,9 +672,6 @@ class App(ctk.CTk):
         if path:
             self.rubric_path = path
             self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
-            
-            # Parse rubric for answer key
-            threading.Thread(target=self.parse_rubric_for_answers, daemon=True).start()
             
             self.check_ready_and_verify()
 
@@ -939,6 +934,78 @@ class App(ctk.CTk):
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
         self.save_current_config()
+        
+        # Check and generate answer key if needed (BEFORE grading)
+        self.ensure_answer_key_and_run(self._run_grading_process)
+    
+    def ensure_answer_key_and_run(self, callback):
+        """Ensure answer key exists before running callback"""
+        # Check if answer_key.json exists
+        if self.exam_folder:
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_loaded"))
+                    # Answer key exists, proceed to callback
+                    callback()
+                    return
+                except Exception as e:
+                    self.log(f"Failed to load existing answer key: {e}")
+        
+        # No answer key found, need to extract
+        if not self.rubric_path:
+            messagebox.showerror(self.t("title_error"), "Cannot generate answer key: no rubric loaded.")
+            return
+        
+        # Extract in background, then run callback after confirmation
+        threading.Thread(target=self.extract_answer_key_for_grading, args=(callback,), daemon=True).start()
+    
+    def extract_answer_key_for_grading(self, callback):
+        """Extract answer key and then run callback after user confirms"""
+        try:
+            with open(self.rubric_path, 'r', encoding='utf-8') as f:
+                rubric_text = f.read()
+            
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            if not api_key: 
+                self.after(0, lambda: messagebox.showerror(self.t("title_error"), "API key required"))
+                return
+            
+            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            
+            # Use Concurrent Extraction & Consolidation (with detailed logging)
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)))
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)))
+            
+            count = len(final_key)
+            self.after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
+            
+            # Show Review Dialog
+            json_path = os.path.join(self.exam_folder, "answer_key.json") if self.exam_folder else None
+            
+            def on_confirm_and_run(confirmed_json):
+                self.answer_key = confirmed_json
+                
+                # Save to JSON
+                if json_path:
+                    try:
+                        with open(json_path, 'w', encoding='utf-8') as f:
+                            json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                        self.log(self.t("log_answer_key_saved"))
+                    except Exception as e:
+                        self.log(f"Failed to save answer key: {e}")
+                
+                # Now run the grading process
+                callback()
+            
+            self.after(0, lambda: self.log(self.t("log_answer_key_waiting_confirm")))
+            self.after(0, lambda: self.show_standard_answer_dialog_with_callback(final_key, report, json_path, on_confirm_and_run))
+            
+        except Exception as e:
+            self.after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
+            self.after(0, lambda: messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {e}"))
         
         self.ensure_layout_and_run(self._run_grading_process)
 
@@ -1475,6 +1542,16 @@ class App(ctk.CTk):
                     self.log(f"Failed to save answer key: {e}")
             else:
                 self.log("⚠️ Cannot save answer key: exam folder not selected yet.")
+        
+        StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
+
+    def show_standard_answer_dialog_with_callback(self, initial_json, report, save_path, callback):
+        """Show dialog with custom callback instead of default save behavior"""
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        def on_confirm(confirmed_json):
+            self.log(self.t("log_answer_key_confirmed"))
+            callback(confirmed_json)
         
         StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
 
