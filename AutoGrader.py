@@ -1473,6 +1473,13 @@ class App(ctk.CTk):
             md += f"  - 填涂考号: {ocr_id_filled}\n"
 
         # --- Score Summary ---
+        try:
+            total_score = float(total_score) if total_score else 0
+            if isinstance(total_score, float) and total_score.is_integer():
+                total_score = int(total_score)
+        except:
+            total_score = 0
+            
         subj_score_sum = total_score - obj_score_sum
         if subj_score_sum < 0: subj_score_sum = 0
         
