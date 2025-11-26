@@ -9,6 +9,7 @@ import shutil
 import datetime
 import concurrent.futures
 import json
+import copy
 from typing import List, Dict, Any, Optional
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
