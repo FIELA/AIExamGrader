@@ -107,6 +107,7 @@ class AIGraderEngine:
         对于**主观题**，`details` 中必须包含：
         - `scoring_points`: 字符串，列出得分点 (例如: "提到洋流交汇(+2)")
         - `error_analysis`: 字符串，分析失分原因 (例如: "未提到地形影响")
+        - `standard_answer`: 字符串，该小题的正确答案/参考答案
         
         JSON 结构示例：
         {{
@@ -125,7 +126,8 @@ class AIGraderEngine:
                     "score": 2, 
                     "max_score": 3,
                     "scoring_points": "提到寒暖流交汇得2分",
-                    "error_analysis": "未提到饵料丰富，扣1分"
+                    "error_analysis": "未提到饵料丰富，扣1分",
+                    "standard_answer": "寒暖流交汇带来丰富饵料..."
                 }}
             ], 
             "total_score": 85
