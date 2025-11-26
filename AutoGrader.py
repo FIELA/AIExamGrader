@@ -1622,8 +1622,20 @@ class App(ctk.CTk):
             return
         
         if not hasattr(self, 'answer_key') or not self.answer_key:
-            messagebox.showerror(self.t("title_error"), "No answer key found. Please load rubric first.")
-            return
+            # Try to load from file
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_found"))
+                except Exception as e:
+                    self.log(f"Failed to load answer key: {e}")
+            
+            # Check again
+            if not hasattr(self, 'answer_key') or not self.answer_key:
+                messagebox.showerror(self.t("title_error"), "No answer key found. Please load rubric first.")
+                return
         
         # Show Dialog to Edit Answer Key
         from standard_answer_dialog import StandardAnswerReviewDialog
