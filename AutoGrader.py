@@ -452,7 +452,7 @@ class App(ctk.CTk):
             "model": self.combo_model.get(),
             "rubric_path": getattr(self, "rubric_path", ""),
             "exam_folder": getattr(self, "exam_folder", ""),
-            "student_list": getattr(self.student_manager, "student_file", "") if hasattr(self, "student_manager") else ""
+            "student_list": getattr(self.student_manager, "student_path", "") if hasattr(self, "student_manager") else ""
         }
         
         # Ask for profile name
