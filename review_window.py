@@ -1685,11 +1685,11 @@ class ReviewWindow(ctk.CTkToplevel):
 
     def setup_global_scroll(self):
         """Bind global mousewheel events to handle scrolling based on hover"""
-        # Bind to the main window
-        self.window.bind("<MouseWheel>", self.on_global_mousewheel)
+        # Bind to the main window (self is the Toplevel)
+        self.bind("<MouseWheel>", self.on_global_mousewheel)
         # Linux support
-        self.window.bind("<Button-4>", self.on_global_mousewheel)
-        self.window.bind("<Button-5>", self.on_global_mousewheel)
+        self.bind("<Button-4>", self.on_global_mousewheel)
+        self.bind("<Button-5>", self.on_global_mousewheel)
 
     def on_global_mousewheel(self, event):
         # Only handle if subj_scroll exists and is visible
@@ -1697,9 +1697,9 @@ class ReviewWindow(ctk.CTkToplevel):
             return
 
         # Check if mouse is over subj_scroll
-        x, y = self.window.winfo_pointerxy()
+        x, y = self.winfo_pointerxy()
         try:
-            widget = self.window.winfo_containing(x, y)
+            widget = self.winfo_containing(x, y)
         except Exception:
             return
 
