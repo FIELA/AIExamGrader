@@ -1351,16 +1351,30 @@ class App(ctk.CTk):
                 md += f"- **{q_id}**: {score}/{max_score}\n"
                 if is_english:
                     md += f"  - **Student Answer**: {student_text}\n"
-                    if scoring_points:
-                        md += f"  - **Scoring Points**: {scoring_points}\n"
-                    if error_analysis:
-                        md += f"  - **Analysis**: {error_analysis}\n"
+                    # Always show Scoring Points
+                    sp_text = scoring_points if scoring_points else "No scoring points"
+                    md += f"  - **Scoring Points**: {sp_text}\n"
+                    
+                    # Always show Analysis
+                    ea_text = error_analysis if error_analysis else "None"
+                    md += f"  - **Analysis**: {ea_text}\n"
+
+                    if item.get('standard_answer'):
+                         md += f"  - **Correct Answer**: {item.get('standard_answer')}\n"
                 else:
                     md += f"  - **考生答案**: {student_text}\n"
-                    if scoring_points:
-                        md += f"  - **得分点**: {scoring_points}\n"
-                    if error_analysis:
-                        md += f"  - **失分原因**: {error_analysis}\n"
+                    # Always show Scoring Points
+                    sp_text = scoring_points if scoring_points else "无得分点"
+                    md += f"  - **得分点**: {sp_text}\n"
+                    
+                    # Always show Error Analysis
+                    ea_text = error_analysis if error_analysis else "无"
+                    md += f"  - **失分原因**: {ea_text}\n"
+                    
+                    if item.get('standard_answer'):
+                         md += f"  - **正确答案**: {item.get('standard_answer')}\n"
+                
+                md += "\n"
 
         return md, sub_scores_dict, consistency_note, matches, obj_score_sum
 
