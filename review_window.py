@@ -971,18 +971,25 @@ class ReviewWindow(ctk.CTkToplevel):
             except: return
 
         # 4. Recalculate Total
-        details = self.current_data.get('details', [])
-        sub_sum = sum(x.get('score', 0) for x in details)
-        legacy_obj = self.current_data.get('legacy_obj_score', 0)
-        
-        if not details:
-             self.current_data['total_score'] = legacy_obj
+        # 4. Recalculate Total
+        if self.chk_absence_var.get():
+            self.current_data['total_score'] = 0
+            self.current_data['legacy_obj_score'] = 0
+            for item in self.current_data.get('details', []):
+                item['score'] = 0
         else:
-             has_obj = any("客观" in x.get('type', '') for x in details)
-             if has_obj:
-                 self.current_data['total_score'] = sub_sum
-             else:
-                 self.current_data['total_score'] = sub_sum + legacy_obj
+            details = self.current_data.get('details', [])
+            sub_sum = sum(x.get('score', 0) for x in details)
+            legacy_obj = self.current_data.get('legacy_obj_score', 0)
+            
+            if not details:
+                 self.current_data['total_score'] = legacy_obj
+            else:
+                 has_obj = any("客观" in x.get('type', '') for x in details)
+                 if has_obj:
+                     self.current_data['total_score'] = sub_sum
+                 else:
+                     self.current_data['total_score'] = sub_sum + legacy_obj
         
         self.save_to_disk()
         self.next_student()
@@ -1054,18 +1061,24 @@ class ReviewWindow(ctk.CTkToplevel):
                 except: return False
 
         # Recalculate Total Score
-        details = self.current_data.get('details', [])
-        sub_sum = sum(x.get('score', 0) for x in details)
-        legacy_obj = self.current_data.get('legacy_obj_score', 0)
-        
-        if not details:
-             self.current_data['total_score'] = legacy_obj
+        if self.chk_absence_var.get():
+            self.current_data['total_score'] = 0
+            self.current_data['legacy_obj_score'] = 0
+            for item in self.current_data.get('details', []):
+                item['score'] = 0
         else:
-             has_obj = any("客观" in x.get('type', '') for x in details)
-             if has_obj:
-                 self.current_data['total_score'] = sub_sum
-             else:
-                 self.current_data['total_score'] = sub_sum + legacy_obj
+            details = self.current_data.get('details', [])
+            sub_sum = sum(x.get('score', 0) for x in details)
+            legacy_obj = self.current_data.get('legacy_obj_score', 0)
+            
+            if not details:
+                 self.current_data['total_score'] = legacy_obj
+            else:
+                 has_obj = any("客观" in x.get('type', '') for x in details)
+                 if has_obj:
+                     self.current_data['total_score'] = sub_sum
+                 else:
+                     self.current_data['total_score'] = sub_sum + legacy_obj
         
         self.save_to_disk()
         return True
