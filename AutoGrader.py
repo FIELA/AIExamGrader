@@ -976,8 +976,8 @@ class App(ctk.CTk):
             engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             
             # Use Concurrent Extraction & Consolidation (with detailed logging)
-            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)))
-            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)))
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
             count = len(final_key)
             self.after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
@@ -1514,8 +1514,9 @@ class App(ctk.CTk):
             engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             
             # Use Concurrent Extraction & Consolidation
-            raw_results = engine.extract_answer_key_concurrent(rubric_text)
-            final_key, report = engine.consolidate_answer_keys(raw_results)
+            log_cb = lambda msg: self.after(0, lambda m=msg: self.log(m))
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=log_cb, t_func=self.t)
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=log_cb, t_func=self.t)
             
             count = len(final_key)
             self.log(self.t("log_answers_extracted", count=count))

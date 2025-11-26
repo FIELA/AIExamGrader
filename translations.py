@@ -195,7 +195,14 @@ TRANSLATIONS = {
         "log_confirm_absence": "• 确认缺考: '{old}' -> '{new}'",
         "title_review_logs": "复审日志",
         "lbl_review_logs_title": "复审日志: {name}",
-        "lbl_reviewer": "复审员"
+        "lbl_reviewer": "复审员",
+        
+        # Answer Key Extraction Logs
+        "log_req_sent": "📤 标准答案分析请求 {index} 已发出",
+        "log_req_received": "📥 标准答案分析请求 {index} 已收到回复",
+        "log_req_all_received": "✅ 已收到全部标准答案分析请求 ({count}/3)",
+        "log_consolidation_sent": "📤 整合分析请求已发出",
+        "log_consolidation_received": "📥 整合分析请求已收到回复"
     },
     "EN": {
         "app_title": "AI Exam Grader",
@@ -392,6 +399,13 @@ TRANSLATIONS = {
         "log_confirm_absence": "• Confirm Absence: '{old}' -> '{new}'",
         "title_review_logs": "Review Logs",
         "lbl_review_logs_title": "Review Logs: {name}",
-        "lbl_reviewer": "Reviewer"
+        "lbl_reviewer": "Reviewer",
+        
+        # Answer Key Extraction Logs
+        "log_req_sent": "📤 Answer key analysis request {index} sent",
+        "log_req_received": "📥 Answer key analysis request {index} received",
+        "log_req_all_received": "✅ Received all answer key analysis responses ({count}/3)",
+        "log_consolidation_sent": "📤 Consolidation analysis request sent",
+        "log_consolidation_received": "📥 Consolidation analysis response received"
     }
 }

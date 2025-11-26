@@ -276,7 +276,7 @@ class AIGraderEngine:
         except Exception as e:
             print(f"Error extracting answer key: {e}")
             return {}
-    def extract_answer_key_concurrent(self, rubric_text, log_callback=None):
+    def extract_answer_key_concurrent(self, rubric_text, log_callback=None, t_func=None):
         """
         Extracts standard answers concurrently (3 times) to ensure robustness.
         Returns a list of 3 JSON results.
@@ -284,9 +284,14 @@ class AIGraderEngine:
         import concurrent.futures
         
         if log_callback:
-            log_callback("📤 标准答案分析请求 1 已发出 / Answer key analysis request 1 sent")
-            log_callback("📤 标准答案分析请求 2 已发出 / Answer key analysis request 2 sent")
-            log_callback("📤 标准答案分析请求 3 已发出 / Answer key analysis request 3 sent")
+            if t_func:
+                log_callback(t_func("log_req_sent", index=1))
+                log_callback(t_func("log_req_sent", index=2))
+                log_callback(t_func("log_req_sent", index=3))
+            else:
+                log_callback("📤 标准答案分析请求 1 已发出 / Answer key analysis request 1 sent")
+                log_callback("📤 标准答案分析请求 2 已发出 / Answer key analysis request 2 sent")
+                log_callback("📤 标准答案分析请求 3 已发出 / Answer key analysis request 3 sent")
         
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
@@ -297,16 +302,22 @@ class AIGraderEngine:
                     if res: 
                         results.append(res)
                         if log_callback:
-                            log_callback(f"📥 标准答案分析请求 {idx} 已收到回复 / Answer key analysis request {idx} received")
+                            if t_func:
+                                log_callback(t_func("log_req_received", index=idx))
+                            else:
+                                log_callback(f"📥 标准答案分析请求 {idx} 已收到回复 / Answer key analysis request {idx} received")
                 except Exception as e:
                     print(f"Concurrent extraction failed: {e}")
         
         if log_callback:
-            log_callback(f"✅ 已收到全部标准答案分析请求 ({len(results)}/3) / Received all answer key analysis responses ({len(results)}/3)")
+            if t_func:
+                log_callback(t_func("log_req_all_received", count=len(results)))
+            else:
+                log_callback(f"✅ 已收到全部标准答案分析请求 ({len(results)}/3) / Received all answer key analysis responses ({len(results)}/3)")
         
         return results
 
-    def consolidate_answer_keys(self, results, log_callback=None):
+    def consolidate_answer_keys(self, results, log_callback=None, t_func=None):
         """
         Consolidates multiple answer key JSONs into one robust version.
         Returns tuple: (consolidated_json, consistency_report_string)
@@ -314,7 +325,10 @@ class AIGraderEngine:
         if not results: return {}, "No results to consolidate."
         
         if log_callback:
-            log_callback("📤 整合分析请求已发出 / Consolidation analysis request sent")
+            if t_func:
+                log_callback(t_func("log_consolidation_sent"))
+            else:
+                log_callback("📤 整合分析请求已发出 / Consolidation analysis request sent")
         
         prompt = f"""
         以下是针对同一份评分细则提取的 {len(results)} 份标准答案 JSON。
