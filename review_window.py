@@ -332,12 +332,13 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
         self.btn_logs.pack(side="left", padx=5)
         
-        self.lbl_score = ctk.CTkLabel(self.action_frame, text=self.t("lbl_total_score_display", score="--"), font=("Arial", 14, "bold"), text_color="#2563EB")
-        self.lbl_score.place(relx=0.5, rely=0.5, anchor="center")
-        
         # --- Right Group (Packed from Right to Left) ---
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
         self.btn_confirm_all.pack(side="right", padx=10, pady=10)
+        
+        # Total Score (Moved here, to the left of Confirm button)
+        self.lbl_score = ctk.CTkLabel(self.action_frame, text=self.t("lbl_total_score_display", score="--"), font=("Arial", 16, "bold"), text_color="#2563EB")
+        self.lbl_score.pack(side="right", padx=15)
         
         self.btn_next_image = ctk.CTkButton(self.action_frame, text=self.t("btn_next_image"), width=40, command=self.skip_student, fg_color="#D97706")
         self.btn_next_image.pack(side="right", padx=5, pady=10)
