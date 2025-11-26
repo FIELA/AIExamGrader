@@ -1412,27 +1412,60 @@ class App(ctk.CTk):
         """
         if not self.rubric_path: return
         
+        # 1. Check for existing JSON in exam_folder
+        json_path = None
+        if self.exam_folder:
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_loaded"))
+                    return # Done
+                except Exception as e:
+                    self.log(f"Failed to load existing answer key: {e}")
+        
+        # 2. Extract from Rubric (if no JSON or load failed)
         try:
             with open(self.rubric_path, 'r', encoding='utf-8') as f:
                 rubric_text = f.read()
             
             self.log(self.t("log_extracting_answers"))
             
-            # Initialize engine if not already done (might be needed if checking models hasn't run)
-            # But usually engine is created in start_grading. 
-            # Here we create a temporary one or check if we can reuse logic.
-            # We need api_key and base_url.
             api_key = getattr(self, "current_api_key", self.entry_key.get())
             if not api_key: return
             
             engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
-            self.answer_key = engine.extract_answer_key(rubric_text)
             
-            count = len(self.answer_key)
+            # Use Concurrent Extraction & Consolidation
+            raw_results = engine.extract_answer_key_concurrent(rubric_text)
+            final_key, report = engine.consolidate_answer_keys(raw_results)
+            
+            count = len(final_key)
             self.log(self.t("log_answers_extracted", count=count))
+            
+            # 3. Show Review Dialog (on Main Thread)
+            # We pass a callback to handle the saving after user confirms
+            self.after(0, lambda: self.show_standard_answer_dialog(final_key, report, json_path))
             
         except Exception as e:
             self.log(f"Failed to extract answer key: {e}")
+
+    def show_standard_answer_dialog(self, initial_json, report, save_path):
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        def on_confirm(confirmed_json):
+            self.answer_key = confirmed_json
+            # Save to JSON
+            if save_path:
+                try:
+                    with open(save_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                    self.log(self.t("log_answer_key_saved"))
+                except Exception as e:
+                    self.log(f"Failed to save answer key: {e}")
+        
+        StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
 
     def save_markdown(self, data, original_filename, db_student_info):
         exam_room = db_student_info.get('room', '未知')

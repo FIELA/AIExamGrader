@@ -276,3 +276,71 @@ class AIGraderEngine:
         except Exception as e:
             print(f"Error extracting answer key: {e}")
             return {}
+    def extract_answer_key_concurrent(self, rubric_text):
+        """
+        Extracts standard answers concurrently (3 times) to ensure robustness.
+        Returns a list of 3 JSON results.
+        """
+        import concurrent.futures
+        
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(self.extract_answer_key, rubric_text) for _ in range(3)]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    res = future.result()
+                    if res: results.append(res)
+                except Exception as e:
+                    print(f"Concurrent extraction failed: {e}")
+        return results
+
+    def consolidate_answer_keys(self, results):
+        """
+        Consolidates multiple answer key JSONs into one robust version.
+        Returns tuple: (consolidated_json, consistency_report_string)
+        """
+        if not results: return {}, "No results to consolidate."
+        
+        prompt = f"""
+        以下是针对同一份评分细则提取的 {len(results)} 份标准答案 JSON。
+        请仔细对比它们，生成一份**最准确、无误**的最终标准答案。
+        
+        --- 提取结果列表 ---
+        {json.dumps(results, ensure_ascii=False, indent=2)}
+        --- 结束 ---
+        
+        请执行以下步骤：
+        1. **对比**：检查每个题目的答案是否一致。
+        2. **纠错**：如果存在不一致，请根据多数原则或逻辑判断选择最可能的正确答案。
+        3. **报告**：简要说明一致性情况（例如：“所有题目一致”或“第5题存在分歧，已修正”）。
+        
+        输出格式要求：
+        请输出一个 JSON 对象，包含两个字段：
+        - `final_key`: 最终的标准答案对象（键为题号，值为答案）。
+        - `report`: 一致性分析报告字符串。
+        
+        JSON 示例：
+        {{
+            "final_key": {{ "1": "A", "2": "B" }},
+            "report": "第1-4题一致。第5题两份结果为C，一份为D，最终判定为C。"
+        }}
+        """
+        
+        try:
+            if self.provider == "OpenAI":
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw = response.choices[0].message.content
+            elif self.provider == "Gemini":
+                response = self.gemini_model.generate_content(prompt)
+                raw = response.text
+            
+            data = json.loads(clean_json_string(raw))
+            return data.get("final_key", {}), data.get("report", "No report generated.")
+            
+        except Exception as e:
+            print(f"Consolidation failed: {e}")
+            # Fallback: return the first result
+            return results[0] if results else {}, f"Consolidation failed: {str(e)}"
