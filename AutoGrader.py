@@ -1316,7 +1316,12 @@ class App(ctk.CTk):
                 except:
                     obj_score_sum = 0
                     
-                # print(f"DEBUG: total={total_score}({type(total_score)}), obj={obj_score_sum}({type(obj_score_sum)})")
+                print(f"DEBUG: total={total_score}({type(total_score)}), obj={obj_score_sum}({type(obj_score_sum)})")
+                
+                if not isinstance(total_score, (int, float)):
+                    total_score = 0
+                if not isinstance(obj_score_sum, (int, float)):
+                    obj_score_sum = 0
                     
                 subj_score_sum = total_score - obj_score_sum
                 if subj_score_sum < 0: subj_score_sum = 0
