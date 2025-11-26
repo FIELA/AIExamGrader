@@ -408,11 +408,11 @@ class App(ctk.CTk):
     def get_profile_list(self):
         """Get list of profile names for dropdown"""
         profiles = self.config_manager.get_profile_names()
-        return profiles if profiles else ["<No Profiles>"]
+        return profiles if profiles else [self.t("profile_default_placeholder")]
     
     def on_profile_select(self, choice):
         """Handle profile selection change"""
-        if choice == "<No Profiles>":
+        if choice == self.t("profile_default_placeholder"):
             return
         
         profile_data = self.config_manager.load_profile(choice)
@@ -1238,11 +1238,31 @@ class App(ctk.CTk):
         
         md += "### 1. 客观题\n"
         md += f"**得分**: {obj_score_sum} (正确: {obj_correct_count}/{obj_total_count})\n\n"
-        md += "| 题号 | 考生答案 | 正确答案 | 结果 |\n|---|---|---|---|\n"
-        for item in objective_q:
-            score = item.get('score', 0)
-            result_icon = "✅" if score > 0 else "❌"
-            md += f"| {item.get('question_id')} | {item.get('student_answer')} | {item.get('standard_answer')} | {result_icon} |\n"
+        
+        # Group objective questions by 5
+        group_size = 5
+        for group_start in range(0, len(objective_q), group_size):
+            group = objective_q[group_start:group_start + group_size]
+            
+            # Student answers
+            md += "**考生答案**: "
+            md += " | ".join([f"{item.get('question_id')}: {item.get('student_answer')}" for item in group])
+            md += "\n\n"
+            
+            # Correct answers
+            md += "**正确答案**: "
+            md += " | ".join([f"{item.get('question_id')}: {item.get('standard_answer')}" for item in group])
+            md += "\n\n"
+            
+            # Results
+            md += "**结果**: "
+            results = []
+            for item in group:
+                score = item.get('score', 0)
+                result_icon = "✅" if score > 0 else "❌"
+                results.append(f"{item.get('question_id')}: {result_icon}")
+            md += " | ".join(results)
+            md += "\n\n"
         
         # --- 2. Subjective Questions ---
         md += "\n### 2. 主观题\n"
