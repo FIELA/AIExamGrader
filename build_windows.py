@@ -27,7 +27,9 @@ args = [
     '--noconfirm',  # Overwrite output directory
     '--clean',  # Clean cache
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
+    '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
+    '--add-data=assets;assets',  # Include assets folder (for runtime icon)
     '--hidden-import=PIL._tkinter_finder',
     '--collect-all=customtkinter',
     '--collect-binaries=PIL',
