@@ -171,6 +171,11 @@ TRANSLATIONS = {
         "title_check_failed": "检查失败",
         "title_confirm": "确认",
         
+        "title_save_profile": "保存配置",
+        "msg_enter_profile_name": "请输入配置名称:",
+        "msg_overwrite_profile": "是否覆盖当前配置 '{name}'？\n点击“是”覆盖，点击“否”另存为新配置。",
+        "title_overwrite": "覆盖确认",
+        
         "btn_zoom_in": "➕",
         "btn_zoom_out": "➖",
         "btn_reset_zoom": "↺ 重置",
@@ -416,6 +421,11 @@ TRANSLATIONS = {
         "btn_get_models": "Get Models",
         "btn_test_connection": "Test Connection",
         "msg_test_success": "Connection successful! Model is available.",
-        "msg_test_failed": "Connection failed: {error}"
+        "msg_test_failed": "Connection failed: {error}",
+        
+        "title_save_profile": "Save Profile",
+        "msg_enter_profile_name": "Enter profile name:",
+        "msg_overwrite_profile": "Overwrite current profile '{name}'?\nClick Yes to overwrite, No to save as new.",
+        "title_overwrite": "Confirm Overwrite"
     }
 }

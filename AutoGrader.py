@@ -444,13 +444,7 @@ class App(ctk.CTk):
     def save_current_profile(self):
         """Save current settings as a profile"""
         # Get current settings
-        # Use self.current_api_key if available, else get from entry
         api_key = getattr(self, "current_api_key", self.entry_key.get())
-        # If the entry is currently masked, we must ensure we don't save the masked string
-        if api_key.startswith("sk-") and "..." in api_key:
-             # This is a safety check, but ideally current_api_key should always be correct
-             # If we are in masked state, self.current_api_key holds the real key
-             pass
         
         profile_data = {
             "api_key": api_key,
@@ -462,7 +456,19 @@ class App(ctk.CTk):
             "student_list": getattr(self.student_manager, "student_path", "") if hasattr(self, "student_manager") else ""
         }
         
-        # Ask for profile name
+        current_profile = self.combo_profile.get()
+        default_placeholder = self.t("profile_default_placeholder")
+        
+        # If a valid profile is selected (not placeholder)
+        if current_profile and current_profile != default_placeholder:
+            # Ask to overwrite
+            if messagebox.askyesno(self.t("title_overwrite"), self.t("msg_overwrite_profile", name=current_profile)):
+                # Overwrite
+                self.config_manager.save_profile(current_profile, profile_data)
+                self.log(self.t("log_saved_profile", profile=current_profile))
+                return
+        
+        # If not overwriting, ask for new name
         dialog = ctk.CTkInputDialog(text=self.t("msg_enter_profile_name"), title=self.t("title_save_profile"))
         profile_name = dialog.get_input()
         
@@ -470,14 +476,11 @@ class App(ctk.CTk):
             return
             
         profile_name = profile_name.strip()
-
-        # Save profile
         self.config_manager.save_profile(profile_name, profile_data)
         
         # Update dropdown
         self.combo_profile.configure(values=self.config_manager.get_profile_names())
         self.combo_profile.set(profile_name)
-        
         self.log(self.t("log_saved_profile", profile=profile_name))
     
     def delete_current_profile(self):
