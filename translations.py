@@ -123,7 +123,7 @@ TRANSLATIONS = {
         "btn_review": "复审",
         
         "msg_ready_start": "✨ 发现 {count} 个文件。就绪，请点击“开始阅卷”。",
-        "profile_default_placeholder": "💡 请先填写 API Key 并保存配置",
+        "profile_default_placeholder": "未保存的配置",
         
         # Logs & Misc
         "log_auto_loaded": "🔄 自动加载配置: {profile}",
@@ -313,7 +313,7 @@ TRANSLATIONS = {
         "btn_review": "Review",
         
         "msg_ready_start": "✨ Found {count} files. Ready to start grading.",
-        "profile_default_placeholder": "💡 Please enter API Key and save config",
+        "profile_default_placeholder": "Unsaved Config",
         
         # Logs & Misc
         "log_auto_loaded": "🔄 Auto-loaded profile: {profile}",
