@@ -1459,14 +1459,22 @@ class App(ctk.CTk):
         
         def on_confirm(confirmed_json):
             self.answer_key = confirmed_json
+            
+            # Recalculate save_path in case exam_folder was set after extraction
+            actual_save_path = save_path
+            if not actual_save_path and self.exam_folder:
+                actual_save_path = os.path.join(self.exam_folder, "answer_key.json")
+            
             # Save to JSON
-            if save_path:
+            if actual_save_path:
                 try:
-                    with open(save_path, 'w', encoding='utf-8') as f:
+                    with open(actual_save_path, 'w', encoding='utf-8') as f:
                         json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
                     self.log(self.t("log_answer_key_saved"))
                 except Exception as e:
                     self.log(f"Failed to save answer key: {e}")
+            else:
+                self.log("⚠️ Cannot save answer key: exam folder not selected yet.")
         
         StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
 
