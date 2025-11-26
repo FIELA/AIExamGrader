@@ -28,6 +28,11 @@ args = [
     '--collect-binaries=PIL',  # Collect PIL binary dependencies
 ]
 
+# Add --onefile for Windows to create a single executable
+if os.name != 'posix':  # Windows
+    args.append('--onefile')
+    print("Windows build: Using --onefile mode (single executable)")
+
 # Helper to collect package data
 def add_package(name):
     try:
@@ -67,8 +72,13 @@ add_metadata('google-auth')
 # Run PyInstaller
 try:
     PyInstaller.__main__.run(args)
-    output_name = "AI Exam Grader.app" if os.name == 'posix' else "AI Exam Grader"
-    print(f"\n✅ Build successful! The application is located in 'dist/{output_name}'")
+    if os.name == 'posix':
+        output_name = "AI Exam Grader.app"
+        output_type = "application bundle"
+    else:
+        output_name = "AI Exam Grader.exe"
+        output_type = "single executable"
+    print(f"\n✅ Build successful! The {output_type} is located in 'dist/{output_name}'")
 except Exception as e:
     print(f"\n❌ Build failed: {e}")
     sys.exit(1)
