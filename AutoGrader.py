@@ -537,6 +537,8 @@ class App(ctk.CTk):
             self.rubric_path = profile_data["rubric_path"]
             if os.path.exists(self.rubric_path):
                 self.lbl_rubric_status.configure(text=os.path.basename(self.rubric_path), text_color=("green", "lightgreen"))
+                # Parse rubric for answer key (in background)
+                threading.Thread(target=self.parse_rubric_for_answers, daemon=True).start()
         
         if "exam_folder" in profile_data and profile_data["exam_folder"]:
             self.exam_folder = profile_data["exam_folder"]
