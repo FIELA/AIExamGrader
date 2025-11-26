@@ -1272,6 +1272,76 @@ class App(ctk.CTk):
                 err = str(e)
                 self.after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
 
+    def regenerate_summary_csv(self):
+        """Regenerate the entire summary CSV from report JSONs"""
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir): return
+        
+        # Delete existing CSVs to start fresh
+        csv_en = "Grade_Summary.csv"
+        csv_cn = "成绩汇总表.csv"
+        for fname in [csv_en, csv_cn]:
+            path = os.path.join(self.exam_folder, fname)
+            if os.path.exists(path):
+                try: os.remove(path)
+                except: pass
+        
+        json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
+        # Sort by room/seat if possible
+        try:
+            json_files.sort(key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1].split('.')[0])))
+        except:
+            json_files.sort()
+            
+        for jf in json_files:
+            try:
+                with open(os.path.join(reports_dir, jf), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                db_info = data.get('db_student_info', {})
+                
+                # Calculate stats using helper
+                _, _, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
+                
+                total_score = data.get('total_score', 0)
+                subj_score_sum = total_score - obj_score_sum
+                if subj_score_sum < 0: subj_score_sum = 0
+                
+                # Count objective correct/total
+                details = data.get('details', [])
+                obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                obj_total = len(obj_items)
+                obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
+                
+                data_dict = {
+                    '考场': db_info.get('room', ''),
+                    '座号': db_info.get('seat', ''),
+                    '班级': db_info.get('class', ''),
+                    '姓名': db_info.get('name', ''),
+                    '考号': db_info.get('id', ''),
+                    '总分': total_score,
+                    '信息一致性': consistency_note,
+                    '匹配项数': matches,
+                    'OCR姓名': data.get('ocr_name', ''),
+                    'OCR班级': data.get('ocr_class', ''),
+                    'OCR考场': data.get('ocr_room', ''),
+                    'OCR座号': data.get('ocr_seat', ''),
+                    'OCR手写考号': data.get('ocr_id_written', ''),
+                    'OCR填涂考号': data.get('ocr_id_filled', ''),
+                    '原始文件': data.get('original_image', ''),
+                    '客观题': obj_score_sum,
+                    '客观题正确数': obj_correct,
+                    '客观题总数': obj_total,
+                    '主观题': subj_score_sum,
+                    '复审状态': '已复审' if data.get('reviewed', False) else '未复审',
+                    '缺考标记': '是' if data.get('absent', False) else '否'
+                }
+                
+                self.write_summary_csv(data_dict)
+                
+            except Exception as e:
+                print(f"Error processing {jf} for CSV: {e}")
+
     def generate_report_content(self, data, db_student_info):
         student_name = db_student_info.get('name', '未知')
         student_id = db_student_info.get('id', '未知')
@@ -1752,8 +1822,9 @@ class App(ctk.CTk):
                 self.after(0, lambda e=e, f=json_file: self.log(f"❌ Error processing {f}: {e}"))
         
         # Update CSV
+        # Update CSV (Regenerate to ensure consistency)
         self.after(0, lambda: self.log("🔄 Updating summary CSV..."))
-        self.after(0, self.write_summary_csv)
+        self.after(0, self.regenerate_summary_csv)
         
         # Done
         self.after(0, lambda u=updated_count, t=total: self.log(f"✅ Batch re-grading complete. Updated {u}/{t} students."))
