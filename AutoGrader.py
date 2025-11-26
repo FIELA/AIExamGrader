@@ -1050,8 +1050,8 @@ class App(ctk.CTk):
         elif os.path.exists(path_cn):
             csv_path = path_cn
         else:
-            # Default to Grade_Summary.csv for new files (more standard)
-            csv_path = path_en
+            # Create based on current language
+            csv_path = path_en if is_en else path_cn
             
         csv_filename = os.path.basename(csv_path)
         
