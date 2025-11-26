@@ -568,6 +568,11 @@ class App(ctk.CTk):
         self.btn_save_profile.configure(text=self.t("btn_save_profile"))
         self.btn_delete_profile.configure(text=self.t("btn_delete_profile"))
         
+        # Update config profile dropdown placeholder if showing default text
+        current_profile = self.combo_profile.get()
+        if current_profile in ["未保存的配置", "Unsaved Config"]:
+            self.combo_profile.set(self.t("profile_default_placeholder"))
+            
         self.lbl_key.configure(text=self.t("lbl_key"))
         self.lbl_base.configure(text=self.t("lbl_base"))
         self.lbl_provider.configure(text=self.t("lbl_provider"))
