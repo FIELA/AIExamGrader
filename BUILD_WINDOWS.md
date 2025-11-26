@@ -83,6 +83,20 @@ If you see `cannot be loaded because running scripts is disabled on this system`
 3. Type `Y` and press Enter
 4. Try activating the venv again
 
+### Microsoft Visual C++ 14.0+ Required
+If you see `Microsoft Visual C++ 14.0 or greater is required` (often when installing `grpcio`):
+1. Download **Microsoft C++ Build Tools**: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. Run the installer
+3. Select **"Desktop development with C++"** workload
+4. Click **Install** (approx. 2-6 GB)
+5. Restart PowerShell and try again
+
+> **⚠️ CRITICAL for Windows ARM64 Users (e.g., Parallels on Mac)**:
+> Python 3.13 does NOT yet have pre-built wheels for `grpcio` on Windows ARM64.
+> **You have two options:**
+> 1. **Recommended**: Uninstall Python 3.13 and install **Python 3.11**. This will allow `pip install` to work without compiling.
+> 2. **Alternative**: Install **Microsoft C++ Build Tools** (takes time and disk space) to compile `grpcio` from source.
+
 ### Network Timeout (pip install fails)
 If you see `ReadTimeoutError` or slow downloads:
 Use a mirror source (e.g., Tsinghua University):

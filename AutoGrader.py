@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 import platform
@@ -60,7 +61,7 @@ class App(ctk.CTk):
         
         # Set App Icon
         try:
-            icon_path = os.path.join("assets", "icon.png")
+            icon_path = self.resource_path(os.path.join("assets", "icon.png"))
             if os.path.exists(icon_path):
                 # Use ImageTk for window icon
                 from PIL import ImageTk
@@ -79,6 +80,34 @@ class App(ctk.CTk):
             self.apply_mac_paste_fix(self.entry_base)
             try: self.apply_mac_paste_fix_to_widget(self.combo_model._entry)
             except: pass
+
+    def resource_path(self, relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS (onefile)
+            base_path = sys._MEIPASS
+        except Exception:
+            # If sys._MEIPASS is not set, check if we are frozen (onedir)
+            if getattr(sys, 'frozen', False):
+                # In onedir mode, assets might be in _internal/assets or just assets relative to exe
+                # PyInstaller v6+ puts dependencies in _internal
+                exe_dir = os.path.dirname(sys.executable)
+                internal_dir = os.path.join(exe_dir, '_internal')
+                
+                # Check _internal first (v6+ default)
+                if os.path.exists(os.path.join(internal_dir, relative_path)):
+                    base_path = internal_dir
+                # Fallback to exe dir (older PyInstaller or different config)
+                elif os.path.exists(os.path.join(exe_dir, relative_path)):
+                    base_path = exe_dir
+                else:
+                    # Last resort: check if it's in _internal but we missed it?
+                    # Or maybe it's just not there. Default to exe dir.
+                    base_path = exe_dir
+            else:
+                base_path = os.path.abspath(".")
+
+        return os.path.join(base_path, relative_path)
 
     def load_icons(self):
         self.icons = {}
@@ -140,7 +169,7 @@ class App(ctk.CTk):
             return img
 
         for name in icon_names:
-            path = os.path.join("assets", "icons", f"{name}.png")
+            path = self.resource_path(os.path.join("assets", "icons", f"{name}.png"))
             if os.path.exists(path):
                 pil_img = Image.open(path)
                 
