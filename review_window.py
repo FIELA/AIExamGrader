@@ -1686,16 +1686,34 @@ class ReviewWindow(ctk.CTkToplevel):
     def enable_mousewheel_scroll(self, scrollable_frame):
         """Enable mouse wheel scrolling for CTkScrollableFrame"""
         def on_mousewheel(event):
-            # Get the internal canvas from CTkScrollableFrame
-            canvas = scrollable_frame._parent_canvas
-            if platform.system() == "Darwin":  # macOS
-                canvas.yview_scroll(int(-1 * (event.delta)), "units")
-            else:  # Windows/Linux
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            try:
+                # Get the internal canvas from CTkScrollableFrame
+                canvas = scrollable_frame._parent_canvas
+                if platform.system() == "Darwin":  # macOS
+                    canvas.yview_scroll(int(-1 * (event.delta)), "units")
+                else:  # Windows/Linux
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
         
-        # Bind to the scrollable frame and its canvas
-        scrollable_frame.bind("<Enter>", lambda e: scrollable_frame._parent_canvas.bind_all("<MouseWheel>", on_mousewheel))
-        scrollable_frame.bind("<Leave>", lambda e: scrollable_frame._parent_canvas.unbind_all("<MouseWheel>"))
+        def bind_to_mousewheel(event):
+            scrollable_frame._parent_canvas.bind_all("<MouseWheel>", on_mousewheel)
+            
+        def unbind_from_mousewheel(event):
+            scrollable_frame._parent_canvas.unbind_all("<MouseWheel>")
+        
+        # Bind to the main frame
+        scrollable_frame.bind("<Enter>", bind_to_mousewheel)
+        scrollable_frame.bind("<Leave>", unbind_from_mousewheel)
+        
+        # Bind to internal components if accessible
+        if hasattr(scrollable_frame, "_parent_canvas"):
+            scrollable_frame._parent_canvas.bind("<Enter>", bind_to_mousewheel)
+            scrollable_frame._parent_canvas.bind("<Leave>", unbind_from_mousewheel)
+            
+        if hasattr(scrollable_frame, "_parent_frame"):
+            scrollable_frame._parent_frame.bind("<Enter>", bind_to_mousewheel)
+            scrollable_frame._parent_frame.bind("<Leave>", unbind_from_mousewheel)
 
     def on_close(self):
         # Auto-save on close
