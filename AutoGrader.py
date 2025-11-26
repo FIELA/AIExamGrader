@@ -348,6 +348,9 @@ class App(ctk.CTk):
 
         self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), image=self.icons.get("review"), fg_color=Theme.INFO, hover_color=Theme.PRIMARY_HOVER, text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_review_window, anchor="center")
         self.btn_review.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        
+        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), image=self.icons.get("refresh"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
+        self.btn_regrade_obj.pack(side="left", padx=8, pady=5, expand=True, fill="x")
 
         # Stats
         self.stats_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
@@ -1466,6 +1469,141 @@ class App(ctk.CTk):
                     self.log(f"Failed to save answer key: {e}")
         
         StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
+
+    def regrade_all_objective(self):
+        """
+        Re-grade all objective questions based on (potentially updated) answer key.
+        """
+        if not self.exam_folder:
+            messagebox.showerror(self.t("title_error"), "Please select exam folder first.")
+            return
+        
+        if not hasattr(self, 'answer_key') or not self.answer_key:
+            messagebox.showerror(self.t("title_error"), "No answer key found. Please load rubric first.")
+            return
+        
+        # Show Dialog to Edit Answer Key
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        old_key = copy.deepcopy(self.answer_key)
+        
+        def on_confirm_regrade(new_key):
+            self.answer_key = new_key
+            
+            # Save updated answer key to JSON
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                self.log(self.t("log_answer_key_saved"))
+            except Exception as e:
+                self.log(f"Failed to save updated answer key: {e}")
+            
+            # Detect Changes
+            changed_qids = []
+            for qid in set(list(old_key.keys()) + list(new_key.keys())):
+                if old_key.get(qid) != new_key.get(qid):
+                    changed_qids.append(qid)
+            
+            if not changed_qids:
+                messagebox.showinfo(self.t("title_success"), "No changes detected in answer key.")
+                return
+            
+            self.log(f"🔄 Answer key changes detected for Q: {', '.join(changed_qids)}")
+            self.log(f"🔄 Starting batch re-grading for all students...")
+            
+            # Start batch re-grading in thread
+            threading.Thread(target=self.batch_regrade_objective, args=(changed_qids,), daemon=True).start()
+        
+        # Show Review Dialog with current answer key
+        report = "Review and update the answer key below. Changes will trigger batch re-grading."
+        StandardAnswerReviewDialog(self, self.answer_key, report, on_confirm_regrade)
+    
+    def batch_regrade_objective(self, changed_qids):
+        """
+        Batch re-grade all students' objective questions.
+        """
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir):
+            self.after(0, lambda: messagebox.showerror(self.t("title_error"), "Reports directory not found."))
+            return
+        
+        json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
+        total = len(json_files)
+        self.after(0, lambda: self.log(f"📊 Found {total} student records to process."))
+        
+        updated_count = 0
+        
+        for idx, json_file in enumerate(json_files):
+            json_path = os.path.join(reports_dir, json_file)
+            
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                details = data.get('details', [])
+                obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                
+                changed = False
+                log_entries = []
+                
+                for item in obj_items:
+                    qid = str(item.get('question_id', ''))
+                    if qid not in changed_qids:
+                        continue # Skip unchanged questions
+                    
+                    # Use student_answer (respects manual_override from review window)
+                    student_ans = item.get('student_answer', '')
+                    std_ans = self.answer_key.get(qid, '')
+                    max_score = item.get('max_score', 3)
+                    
+                    old_score = item.get('score', 0)
+                    new_score = max_score if student_ans == std_ans else 0
+                    
+                    if old_score != new_score:
+                        item['score'] = new_score
+                        log_entries.append(f"Q{qid}: {old_score} → {new_score}")
+                        changed = True
+                
+                if changed:
+                    # Recalculate Total
+                    total_score = sum(x.get('score', 0) for x in details)
+                    data['total_score'] = total_score
+                    
+                    # Add Log Entry
+                    log_entry = {
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "changes": ["Batch Re-grading"] + log_entries,
+                        "user": "System"
+                    }
+                    if 'review_logs' not in data:
+                        data['review_logs'] = []
+                    data['review_logs'].append(log_entry)
+                    
+                    # Save JSON
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    
+                    # Update Markdown
+                    md_path = json_path.replace('.json', '.md')
+                    db_info = data.get('db_student_info', {})
+                    md_content, _, _, _, _ = self.generate_report_content(data, db_info)
+                    with open(md_path, 'w', encoding='utf-8') as f:
+                        f.write(md_content)
+                    
+                    updated_count += 1
+                
+            except Exception as e:
+                self.after(0, lambda e=e, f=json_file: self.log(f"❌ Error processing {f}: {e}"))
+        
+        # Update CSV
+        self.after(0, lambda: self.log("🔄 Updating summary CSV..."))
+        self.after(0, self.write_summary_csv)
+        
+        # Done
+        self.after(0, lambda u=updated_count, t=total: self.log(f"✅ Batch re-grading complete. Updated {u}/{t} students."))
+        self.after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
+
 
     def save_markdown(self, data, original_filename, db_student_info):
         exam_room = db_student_info.get('room', '未知')

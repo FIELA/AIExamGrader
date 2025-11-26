@@ -121,6 +121,7 @@ TRANSLATIONS = {
         "btn_save_profile": "💾 保存",
         "btn_delete_profile": "🗑️ 删除",
         "btn_review": "复审",
+        "btn_regrade_obj": "重评客观题",
         
         "msg_ready_start": "✨ 发现 {count} 个文件。就绪，请点击“开始阅卷”。",
         "profile_default_placeholder": "未保存的配置",
@@ -156,6 +157,8 @@ TRANSLATIONS = {
         "log_rubric_loaded": "📄 评分标准已加载。",
         "log_extracting_answers": "🧠 正在从评分标准中提取标准答案...",
         "log_answers_extracted": "✅ 已提取 {count} 个标准答案。",
+        "log_answer_key_loaded": "✅ 已从文件加载标准答案。",
+        "log_answer_key_saved": "💾 标准答案已保存至文件。",
         
         "msg_no_profile_delete": "未选择要删除的配置",
         "msg_confirm_delete": "确定要删除配置 '{profile}' 吗？",
@@ -349,6 +352,8 @@ TRANSLATIONS = {
         "log_rubric_loaded": "📄 Rubric loaded.",
         "log_extracting_answers": "🧠 Extracting standard answers from rubric...",
         "log_answers_extracted": "✅ Extracted {count} standard answers.",
+        "log_answer_key_loaded": "✅ Loaded answer key from file.",
+        "log_answer_key_saved": "💾 Answer key saved to file.",
         
         "msg_no_profile_delete": "No profile selected to delete",
         "msg_confirm_delete": "Delete profile '{profile}'?",
