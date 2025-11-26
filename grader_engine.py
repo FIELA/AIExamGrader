@@ -146,6 +146,8 @@ class AIGraderEngine:
                         ]}
                     ]
                 )
+                if not response.choices:
+                    raise ValueError("API returned no choices. Check model availability or content filters.")
                 raw_content = response.choices[0].message.content
                 return json.loads(clean_json_string(raw_content))
 
@@ -231,6 +233,8 @@ class AIGraderEngine:
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}]
                 )
+                if not response.choices:
+                    return descriptions[0] # Fallback
                 return response.choices[0].message.content
             elif self.provider == "Gemini":
                 response = self.gemini_model.generate_content(prompt)
@@ -269,6 +273,8 @@ class AIGraderEngine:
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}]
                 )
+                if not response.choices:
+                    raise ValueError("API returned no choices.")
                 return json.loads(clean_json_string(response.choices[0].message.content))
             elif self.provider == "Gemini":
                 response = self.gemini_model.generate_content(prompt)
