@@ -1310,6 +1310,13 @@ class App(ctk.CTk):
                         total_score = int(total_score)
                 except:
                     total_score = 0
+                
+                try:
+                    obj_score_sum = int(obj_score_sum)
+                except:
+                    obj_score_sum = 0
+                    
+                # print(f"DEBUG: total={total_score}({type(total_score)}), obj={obj_score_sum}({type(obj_score_sum)})")
                     
                 subj_score_sum = total_score - obj_score_sum
                 if subj_score_sum < 0: subj_score_sum = 0
