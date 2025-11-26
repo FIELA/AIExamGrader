@@ -396,6 +396,11 @@ class App(ctk.CTk):
                 self.apply_profile(profile_data)
                 self.combo_profile.set(last_profile)
                 self.log(self.t("log_auto_loaded", profile=last_profile))
+        else:
+            # No profile loaded, show placeholder
+            profiles = self.get_profile_list()
+            if profiles:
+                self.combo_profile.set(profiles[0])
         
         self.log(self.t("msg_config_loaded"))
 
