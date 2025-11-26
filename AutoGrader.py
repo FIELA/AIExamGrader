@@ -258,46 +258,44 @@ class App(ctk.CTk):
         self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=32, fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER, corner_radius=8, font=ctk.CTkFont(size=13))
         self.btn_delete_profile.grid(row=0, column=1, padx=(6, 0), sticky="ew")
 
-        # API Config
+        # 1. Provider
+        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_provider"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_provider.grid(row=6, column=0, padx=16, pady=(10, 4), sticky="w")
+        self.provider_var = ctk.StringVar(value="OpenAI")
+        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8, width=228)
+        self.combo_provider.grid(row=7, column=0, padx=16, pady=(0, 10))
+
+        # 2. API Key
         self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w")
-        self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_key.grid(row=8, column=0, padx=20, pady=(0, 4), sticky="w")
         self.entry_key = ctk.CTkEntry(self.sidebar_frame, width=220)
-        self.entry_key.grid(row=7, column=0, padx=20, pady=(5, 10))
+        self.entry_key.grid(row=9, column=0, padx=20, pady=(0, 10))
         
         # Bind events for masking
         self.entry_key.bind("<FocusIn>", self._on_key_focus_in)
         self.entry_key.bind("<FocusOut>", self._on_key_focus_out)
         self.entry_key.bind("<KeyRelease>", self._on_key_release)
 
-        # Provider & Model (Re-added as they were removed in the provided snippet but are essential)
+        # 3. Base URL
         self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_base.grid(row=8, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.lbl_base.grid(row=10, column=0, padx=16, pady=(0, 4), sticky="w")
         self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...", height=32, corner_radius=8, width=228)
-        self.entry_base.grid(row=9, column=0, padx=16, pady=(0, 16))
+        self.entry_base.grid(row=11, column=0, padx=16, pady=(0, 10))
 
-        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_provider"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_provider.grid(row=10, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.provider_var = ctk.StringVar(value="OpenAI")
-        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8, width=228)
-        self.combo_provider.grid(row=11, column=0, padx=16, pady=(0, 12))
+        # 4. Get Models Button
+        self.btn_get_models = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_get_models"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
+        self.btn_get_models.grid(row=12, column=0, padx=16, pady=(0, 10))
 
+        # 5. Model Name
         self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_model"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_model.grid(row=12, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.lbl_model.grid(row=13, column=0, padx=16, pady=(0, 4), sticky="w")
         self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"], height=32, corner_radius=8, width=228)
         self.combo_model.set("gemini-2.5-pro-maxthinking")
-        self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12))
+        self.combo_model.grid(row=14, column=0, padx=16, pady=(0, 10))
         
-        # Model Actions Frame
-        self.model_action_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.model_action_frame.grid(row=14, column=0, padx=16, pady=(8, 16), sticky="ew")
-        self.model_action_frame.grid_columnconfigure(0, weight=1)
-        self.model_action_frame.grid_columnconfigure(1, weight=1)
-        
-        self.btn_get_models = ctk.CTkButton(self.model_action_frame, text=self.t("btn_get_models"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
-        self.btn_get_models.grid(row=0, column=0, padx=(0, 4), sticky="ew")
-        
-        self.btn_test_connection = ctk.CTkButton(self.model_action_frame, text=self.t("btn_test_connection"), command=self.test_connection, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13))
-        self.btn_test_connection.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        # 6. Test Connection Button
+        self.btn_test_connection = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_test_connection"), command=self.test_connection, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
+        self.btn_test_connection.grid(row=15, column=0, padx=16, pady=(0, 16))
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
