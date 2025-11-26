@@ -975,7 +975,8 @@ class App(ctk.CTk):
         self.save_current_config()
         
         # Check and generate answer key if needed (BEFORE grading)
-        self.ensure_answer_key_and_run(self._run_grading_process)
+        # Chain: Answer Key -> Layout -> Grading
+        self.ensure_answer_key_and_run(lambda: self.ensure_layout_and_run(self._run_grading_process))
     
     def ensure_answer_key_and_run(self, callback):
         """Ensure answer key exists before running callback"""
@@ -1045,8 +1046,6 @@ class App(ctk.CTk):
         except Exception as e:
             self.after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
             self.after(0, lambda: messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {e}"))
-        
-        self.ensure_layout_and_run(self._run_grading_process)
 
     def _run_grading_process(self):
         self.processing = True
