@@ -1423,15 +1423,21 @@ class App(ctk.CTk):
         
         # --- 2. Subjective Questions ---
         if is_english:
-            md += "\n### 2. Subjective Questions\n"
+            md += f"\n### 2. Subjective Questions (Total Score: {subj_score_sum})\n"
         else:
-            md += "\n### 2. 主观题\n"
+            md += f"\n### 2. 主观题 (总分: {subj_score_sum})\n"
             
         sorted_keys = sorted(subjective_q.keys(), key=lambda x: int(x) if x.isdigit() else 999)
         
         for main_id in sorted_keys:
             items = subjective_q[main_id]
             main_total = sub_scores_dict.get(f"{main_id}", 0)
+            
+            # Add Main Question Header
+            if is_english:
+                md += f"\n#### Question {main_id} (Score: {main_total})\n"
+            else:
+                md += f"\n#### 第 {main_id} 题 (得分: {main_total})\n"
             
             for item in items:
                 q_id = item.get('question_id', '')
