@@ -146,6 +146,8 @@ class AIGraderEngine:
                         ]}
                     ]
                 )
+                if not response.choices:
+                    raise ValueError("API returned no choices. Check model availability or content filters.")
                 raw_content = response.choices[0].message.content
                 return json.loads(clean_json_string(raw_content))
 
@@ -231,6 +233,8 @@ class AIGraderEngine:
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}]
                 )
+                if not response.choices:
+                    return descriptions[0] # Fallback
                 return response.choices[0].message.content
             elif self.provider == "Gemini":
                 response = self.gemini_model.generate_content(prompt)
@@ -238,3 +242,148 @@ class AIGraderEngine:
         except Exception as e:
             return descriptions[0] # Fallback
 
+    def extract_answer_key(self, rubric_text):
+        """
+        Extracts standard answers from the rubric text.
+        Returns a dictionary {question_id: standard_answer}.
+        """
+        prompt = f"""
+        请仔细阅读以下【评分细则】，提取出所有题目的【标准答案】。
+        
+        --- 评分细则 ---
+        {rubric_text}
+        --- 结束 ---
+        
+        请输出一个 JSON 对象，键为题号，值为标准答案/参考答案。
+        对于客观题，值为选项字母（如 "A"）。
+        对于主观题，值为参考答案的文本摘要。
+        
+        JSON 示例：
+        {{
+            "1": "A",
+            "2": "B",
+            "17(1)": "寒暖流交汇带来丰富饵料",
+            "17(2)": "位于北半球，气旋逆时针旋转"
+        }}
+        """
+        
+        try:
+            if self.provider == "OpenAI":
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                if not response.choices:
+                    raise ValueError("API returned no choices.")
+                return json.loads(clean_json_string(response.choices[0].message.content))
+            elif self.provider == "Gemini":
+                response = self.gemini_model.generate_content(prompt)
+                return json.loads(clean_json_string(response.text))
+        except Exception as e:
+            print(f"Error extracting answer key: {e}")
+            return {}
+    def extract_answer_key_concurrent(self, rubric_text, log_callback=None, t_func=None):
+        """
+        Extracts standard answers concurrently (3 times) to ensure robustness.
+        Returns a list of 3 JSON results.
+        """
+        import concurrent.futures
+        
+        if log_callback:
+            if t_func:
+                log_callback(t_func("log_req_sent", index=1))
+                log_callback(t_func("log_req_sent", index=2))
+                log_callback(t_func("log_req_sent", index=3))
+            else:
+                log_callback("📤 标准答案分析请求 1 已发出 / Answer key analysis request 1 sent")
+                log_callback("📤 标准答案分析请求 2 已发出 / Answer key analysis request 2 sent")
+                log_callback("📤 标准答案分析请求 3 已发出 / Answer key analysis request 3 sent")
+        
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(self.extract_answer_key, rubric_text) for _ in range(3)]
+            for idx, future in enumerate(concurrent.futures.as_completed(futures), 1):
+                try:
+                    res = future.result()
+                    if res: 
+                        results.append(res)
+                        if log_callback:
+                            if t_func:
+                                log_callback(t_func("log_req_received", index=idx))
+                            else:
+                                log_callback(f"📥 标准答案分析请求 {idx} 已收到回复 / Answer key analysis request {idx} received")
+                except Exception as e:
+                    print(f"Concurrent extraction failed: {e}")
+        
+        if log_callback:
+            if t_func:
+                log_callback(t_func("log_req_all_received", count=len(results)))
+            else:
+                log_callback(f"✅ 已收到全部标准答案分析请求 ({len(results)}/3) / Received all answer key analysis responses ({len(results)}/3)")
+        
+        return results
+
+    def consolidate_answer_keys(self, results, log_callback=None, t_func=None):
+        """
+        Consolidates multiple answer key JSONs into one robust version.
+        Returns tuple: (consolidated_json, consistency_report_string)
+        """
+        if not results: return {}, "No results to consolidate."
+        
+        if log_callback:
+            if t_func:
+                log_callback(t_func("log_consolidation_sent"))
+            else:
+                log_callback("📤 整合分析请求已发出 / Consolidation analysis request sent")
+        
+        prompt = f"""
+        以下是针对同一份评分细则提取的 {len(results)} 份标准答案 JSON。
+        请仔细对比它们，生成一份**最准确、无误**的最终标准答案。
+        
+        --- 提取结果列表 ---
+        {json.dumps(results, ensure_ascii=False, indent=2)}
+        --- 结束 ---
+        
+        请执行以下步骤：
+        1. **对比**：检查每个题目的答案是否一致。
+        2. **纠错**：如果存在不一致，请根据多数原则或逻辑判断选择最可能的正确答案。
+        3. **报告**：简要说明一致性情况（例如："所有题目一致"或"第5题存在分歧，已修正"）。
+        
+        输出格式要求：
+        请输出一个 JSON 对象，包含两个字段：
+        - `final_key`: 最终的标准答案对象（键为题号，值为答案）。
+        - `report`: 一致性分析报告字符串。
+        
+        示例：
+        ```json
+        {{
+            "final_key": {{"1": "A", "2": "B", "3": "C"}},
+            "report": "所有题目答案一致，无需修正。"
+        }}
+        ```
+        
+        **请只输出 JSON，不要包含任何其他文本。**
+        """
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name, # Changed from self.model to self.model_name to match other calls
+                messages=[
+                    {"role": "system", "content": "You are a precise answer key consolidation assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            
+            result_text = response.choices[0].message.content
+            parsed = json.loads(clean_json_string(result_text))
+            
+            if log_callback:
+                log_callback("📥 整合分析请求已收到回复 / Consolidation analysis response received")
+            
+            return parsed.get('final_key', {}), parsed.get('report', 'No report generated.')
+            
+        except Exception as e:
+            print(f"Consolidation failed: {e}")
+            # Fallback: return the first result
+            return results[0] if results else {}, f"Consolidation failed: {str(e)}"

@@ -9,6 +9,7 @@ import shutil
 import datetime
 import concurrent.futures
 import json
+import copy
 from typing import List, Dict, Any, Optional
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -43,7 +44,10 @@ class App(ctk.CTk):
         self.processing = False
         self.write_lock = threading.RLock()  # Use RLock for reentrant locking
         self.completed_count = 0
+        self.completed_count = 0
         self.total_files = 0
+        
+        self.answer_key = {} # Store standard answers locally
         
         # Control events
         self.pause_event = threading.Event()
@@ -222,7 +226,7 @@ class App(ctk.CTk):
         self.sidebar_frame = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color=(Theme.BG_LIGHT, Theme.BG_DARK))
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_propagate(False) # Prevent resizing based on content
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid_rowconfigure(20, weight=1) # Push content to top
 
         # Logo
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=self.t("logo"), font=ctk.CTkFont(size=20, weight="bold"))
@@ -255,37 +259,44 @@ class App(ctk.CTk):
         self.btn_delete_profile = ctk.CTkButton(self.profile_btn_frame, text=self.t("btn_delete_profile"), command=self.delete_current_profile, width=60, height=32, fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER, corner_radius=8, font=ctk.CTkFont(size=13))
         self.btn_delete_profile.grid(row=0, column=1, padx=(6, 0), sticky="ew")
 
-        # API Config
+        # 1. Provider
+        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_provider"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
+        self.lbl_provider.grid(row=6, column=0, padx=16, pady=(10, 4), sticky="w")
+        self.provider_var = ctk.StringVar(value="OpenAI")
+        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8, width=228)
+        self.combo_provider.grid(row=7, column=0, padx=16, pady=(0, 10))
+
+        # 2. API Key
         self.lbl_key = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_key"), anchor="w")
-        self.lbl_key.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_key.grid(row=8, column=0, padx=20, pady=(0, 4), sticky="w")
         self.entry_key = ctk.CTkEntry(self.sidebar_frame, width=220)
-        self.entry_key.grid(row=7, column=0, padx=20, pady=(5, 10))
+        self.entry_key.grid(row=9, column=0, padx=20, pady=(0, 10))
         
         # Bind events for masking
         self.entry_key.bind("<FocusIn>", self._on_key_focus_in)
         self.entry_key.bind("<FocusOut>", self._on_key_focus_out)
         self.entry_key.bind("<KeyRelease>", self._on_key_release)
 
-        # Provider & Model (Re-added as they were removed in the provided snippet but are essential)
+        # 3. Base URL
         self.lbl_base = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_base"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_base.grid(row=8, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.lbl_base.grid(row=10, column=0, padx=16, pady=(0, 4), sticky="w")
         self.entry_base = ctk.CTkEntry(self.sidebar_frame, placeholder_text="https://...", height=32, corner_radius=8, width=228)
-        self.entry_base.grid(row=9, column=0, padx=16, pady=(0, 16))
+        self.entry_base.grid(row=11, column=0, padx=16, pady=(0, 10))
 
-        self.lbl_provider = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_provider"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_provider.grid(row=10, column=0, padx=16, pady=(12, 4), sticky="w")
-        self.provider_var = ctk.StringVar(value="OpenAI")
-        self.combo_provider = ctk.CTkComboBox(self.sidebar_frame, values=["OpenAI", "Gemini"], variable=self.provider_var, command=self.on_provider_change, height=32, corner_radius=8, width=228)
-        self.combo_provider.grid(row=11, column=0, padx=16, pady=(0, 12))
+        # 4. Get Models Button
+        self.btn_get_models = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_get_models"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
+        self.btn_get_models.grid(row=12, column=0, padx=16, pady=(0, 10))
 
+        # 5. Model Name
         self.lbl_model = ctk.CTkLabel(self.sidebar_frame, text=self.t("lbl_model"), anchor="w", font=ctk.CTkFont(size=13, weight="normal"))
-        self.lbl_model.grid(row=12, column=0, padx=16, pady=(12, 4), sticky="w")
+        self.lbl_model.grid(row=13, column=0, padx=16, pady=(0, 4), sticky="w")
         self.combo_model = ctk.CTkComboBox(self.sidebar_frame, values=["gemini-2.5-pro-maxthinking", "gpt-4o"], height=32, corner_radius=8, width=228)
         self.combo_model.set("gemini-2.5-pro-maxthinking")
-        self.combo_model.grid(row=13, column=0, padx=16, pady=(0, 12))
+        self.combo_model.grid(row=14, column=0, padx=16, pady=(0, 10))
         
-        self.btn_check_model = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_check_model"), command=self.check_models, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
-        self.btn_check_model.grid(row=14, column=0, padx=16, pady=(8, 16))
+        # 6. Test Connection Button
+        self.btn_test_connection = ctk.CTkButton(self.sidebar_frame, text=self.t("btn_test_connection"), command=self.test_connection, fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), height=36, corner_radius=8, font=ctk.CTkFont(size=13), width=228)
+        self.btn_test_connection.grid(row=15, column=0, padx=16, pady=(0, 16))
 
         # --- Main Content (Right) ---
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -345,6 +356,9 @@ class App(ctk.CTk):
 
         self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), image=self.icons.get("review"), fg_color=Theme.INFO, hover_color=Theme.PRIMARY_HOVER, text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_review_window, anchor="center")
         self.btn_review.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        
+        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), image=self.icons.get("refresh"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
+        self.btn_regrade_obj.pack(side="left", padx=8, pady=5, expand=True, fill="x")
 
         # Stats
         self.stats_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
@@ -431,13 +445,7 @@ class App(ctk.CTk):
     def save_current_profile(self):
         """Save current settings as a profile"""
         # Get current settings
-        # Use self.current_api_key if available, else get from entry
         api_key = getattr(self, "current_api_key", self.entry_key.get())
-        # If the entry is currently masked, we must ensure we don't save the masked string
-        if api_key.startswith("sk-") and "..." in api_key:
-             # This is a safety check, but ideally current_api_key should always be correct
-             # If we are in masked state, self.current_api_key holds the real key
-             pass
         
         profile_data = {
             "api_key": api_key,
@@ -446,10 +454,22 @@ class App(ctk.CTk):
             "model": self.combo_model.get(),
             "rubric_path": getattr(self, "rubric_path", ""),
             "exam_folder": getattr(self, "exam_folder", ""),
-            "student_list": getattr(self.student_manager, "student_file", "") if hasattr(self, "student_manager") else ""
+            "student_list": getattr(self.student_manager, "student_path", "") if hasattr(self, "student_manager") else ""
         }
         
-        # Ask for profile name
+        current_profile = self.combo_profile.get()
+        default_placeholder = self.t("profile_default_placeholder")
+        
+        # If a valid profile is selected (not placeholder)
+        if current_profile and current_profile != default_placeholder:
+            # Ask to overwrite
+            if messagebox.askyesno(self.t("title_overwrite"), self.t("msg_overwrite_profile", name=current_profile)):
+                # Overwrite
+                self.config_manager.save_profile(current_profile, profile_data)
+                self.log(self.t("log_saved_profile", profile=current_profile))
+                return
+        
+        # If not overwriting, ask for new name
         dialog = ctk.CTkInputDialog(text=self.t("msg_enter_profile_name"), title=self.t("title_save_profile"))
         profile_name = dialog.get_input()
         
@@ -457,14 +477,11 @@ class App(ctk.CTk):
             return
             
         profile_name = profile_name.strip()
-
-        # Save profile
         self.config_manager.save_profile(profile_name, profile_data)
         
         # Update dropdown
         self.combo_profile.configure(values=self.config_manager.get_profile_names())
         self.combo_profile.set(profile_name)
-        
         self.log(self.t("log_saved_profile", profile=profile_name))
     
     def delete_current_profile(self):
@@ -578,7 +595,8 @@ class App(ctk.CTk):
         self.lbl_base.configure(text=self.t("lbl_base"))
         self.lbl_provider.configure(text=self.t("lbl_provider"))
         self.lbl_model.configure(text=self.t("lbl_model"))
-        self.btn_check_model.configure(text=self.t("btn_check_model"))
+        self.btn_get_models.configure(text=self.t("btn_get_models"))
+        self.btn_test_connection.configure(text=self.t("btn_test_connection"))
         
         self.lbl_resources.configure(text=self.t("lbl_resources"))
         self.btn_rubric.configure(text=self.t("btn_rubric"))
@@ -629,7 +647,7 @@ class App(ctk.CTk):
         if not api_key:
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
-        self.btn_check_model.configure(state="disabled", text=self.t("checking"))
+        self.btn_get_models.configure(state="disabled", text=self.t("checking"))
         def run_check():
             try:
                 engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get())
@@ -639,8 +657,39 @@ class App(ctk.CTk):
                 err = str(e)
                 self.after(0, lambda: messagebox.showerror(self.t("title_check_failed"), err))
             finally:
-                self.after(0, lambda: self.btn_check_model.configure(state="normal", text=self.t("btn_check_model")))
+                self.after(0, lambda: self.btn_get_models.configure(state="normal", text=self.t("btn_get_models")))
         threading.Thread(target=run_check, daemon=True).start()
+
+    def test_connection(self):
+        """Test API connection with current settings"""
+        api_key = getattr(self, "current_api_key", self.entry_key.get())
+        if not api_key:
+            messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
+            return
+            
+        self.btn_test_connection.configure(state="disabled", text=self.t("checking"))
+        
+        def run_test():
+            try:
+                engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+                
+                # Simple generation test
+                if engine.provider == "OpenAI":
+                    engine.client.chat.completions.create(
+                        model=engine.model_name,
+                        messages=[{"role": "user", "content": "Hi"}],
+                        max_tokens=1
+                    )
+                elif engine.provider == "Gemini":
+                    engine.gemini_model.generate_content("Hi")
+                
+                self.after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_test_success")))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_test_failed", error=str(e))))
+            finally:
+                self.after(0, lambda: self.btn_test_connection.configure(state="normal", text=self.t("btn_test_connection")))
+        
+        threading.Thread(target=run_test, daemon=True).start()
 
     def update_model_list(self, models):
         if not models: return
@@ -666,6 +715,7 @@ class App(ctk.CTk):
         if path:
             self.rubric_path = path
             self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
+            
             self.check_ready_and_verify()
 
     def select_folder(self):
@@ -906,17 +956,22 @@ class App(ctk.CTk):
         4. Show confirmation.
         5. Save and run.
         """
+        self.log(self.t("log_checking_layout"))
+        
         if self.template_confirmed:
+            self.log(self.t("log_layout_found"))
             callback()
             return
 
         # Try load
         self.load_layout_config()
         if self.template_confirmed:
+            self.log(self.t("log_layout_found"))
             callback()
             return
 
         # Need detection
+        self.log(self.t("log_layout_missing"))
         self.start_detection_thread(callback)
 
     def start_grading_thread(self):
@@ -928,7 +983,81 @@ class App(ctk.CTk):
             return
         self.save_current_config()
         
-        self.ensure_layout_and_run(self._run_grading_process)
+        self.log(self.t("log_checking_answer_key"))
+        
+        # Check and generate answer key if needed (BEFORE grading)
+        # Chain: Answer Key -> Layout -> Grading
+        self.ensure_answer_key_and_run(lambda: self.ensure_layout_and_run(self._run_grading_process))
+    
+    def ensure_answer_key_and_run(self, callback):
+        """Ensure answer key exists before running callback"""
+        # Check if answer_key.json exists
+        if self.exam_folder:
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_found"))
+                    # Answer key exists, proceed to callback
+                    callback()
+                    return
+                except Exception as e:
+                    self.log(f"Failed to load existing answer key: {e}")
+        
+        # No answer key found, need to extract
+        self.log(self.t("log_answer_key_missing"))
+        if not self.rubric_path:
+            messagebox.showerror(self.t("title_error"), "Cannot generate answer key: no rubric loaded.")
+            return
+        
+        # Extract in background, then run callback after confirmation
+        threading.Thread(target=self.extract_answer_key_for_grading, args=(callback,), daemon=True).start()
+    
+    def extract_answer_key_for_grading(self, callback):
+        """Extract answer key and then run callback after user confirms"""
+        try:
+            with open(self.rubric_path, 'r', encoding='utf-8') as f:
+                rubric_text = f.read()
+            
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            if not api_key: 
+                self.after(0, lambda: messagebox.showerror(self.t("title_error"), "API key required"))
+                return
+            
+            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            
+            # Use Concurrent Extraction & Consolidation (with detailed logging)
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
+            
+            count = len(final_key)
+            self.after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
+            
+            # Show Review Dialog
+            json_path = os.path.join(self.exam_folder, "answer_key.json") if self.exam_folder else None
+            
+            def on_confirm_and_run(confirmed_json):
+                self.answer_key = confirmed_json
+                
+                # Save to JSON
+                if json_path:
+                    try:
+                        with open(json_path, 'w', encoding='utf-8') as f:
+                            json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                        self.log(self.t("log_answer_key_saved"))
+                    except Exception as e:
+                        self.log(f"Failed to save answer key: {e}")
+                
+                # Now run the grading process
+                callback()
+            
+            self.after(0, lambda: self.log(self.t("log_answer_key_waiting_confirm")))
+            self.after(0, lambda: self.show_standard_answer_dialog_with_callback(final_key, report, json_path, on_confirm_and_run))
+            
+        except Exception as e:
+            self.after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
+            self.after(0, lambda: messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {e}"))
 
     def _run_grading_process(self):
         self.processing = True
@@ -966,7 +1095,8 @@ class App(ctk.CTk):
             sample_files = random.sample(files, sample_count)
             
             # 2. Detect concurrently
-            grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            grader = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             
             # Submit all detection tasks concurrently with 1 second stagger
             futures = []
@@ -1015,7 +1145,8 @@ class App(ctk.CTk):
             self.pause_event.clear()
             self.btn_pause.configure(text=self.t("btn_resume"), fg_color="#106A38")
             self.log(self.t("msg_paused"))
-        else:
+            
+        else: # This was the original else block, the user's snippet had a syntax error here.
             self.pause_event.set()
             self.btn_pause.configure(text=self.t("btn_pause"), fg_color="#D97706")
             self.log(self.t("msg_resumed"))
@@ -1030,8 +1161,22 @@ class App(ctk.CTk):
         import csv
         
         is_en = (self.current_lang == "EN")
-        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-        csv_path = os.path.join(self.exam_folder, csv_filename)
+        
+        # Smart Filename Selection: Prioritize existing files
+        csv_en = "Grade_Summary.csv"
+        csv_cn = "成绩汇总表.csv"
+        path_en = os.path.join(self.exam_folder, csv_en)
+        path_cn = os.path.join(self.exam_folder, csv_cn)
+        
+        if os.path.exists(path_en):
+            csv_path = path_en
+        elif os.path.exists(path_cn):
+            csv_path = path_cn
+        else:
+            # Create based on current language
+            csv_path = path_en if is_en else path_cn
+            
+        csv_filename = os.path.basename(csv_path)
         
         # Header Mappings
         header_map = {
@@ -1126,6 +1271,93 @@ class App(ctk.CTk):
             except Exception as e:
                 err = str(e)
                 self.after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
+
+    def regenerate_summary_csv(self):
+        """Regenerate the entire summary CSV from report JSONs"""
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir): return
+        
+        # Delete existing CSVs to start fresh
+        csv_en = "Grade_Summary.csv"
+        csv_cn = "成绩汇总表.csv"
+        for fname in [csv_en, csv_cn]:
+            path = os.path.join(self.exam_folder, fname)
+            if os.path.exists(path):
+                try: os.remove(path)
+                except: pass
+        
+        json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
+        # Sort by room/seat if possible
+        try:
+            json_files.sort(key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1].split('.')[0])))
+        except:
+            json_files.sort()
+            
+        for jf in json_files:
+            try:
+                with open(os.path.join(reports_dir, jf), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                db_info = data.get('db_student_info', {})
+                
+                # Calculate stats using helper
+                _, _, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
+                
+                total_score = data.get('total_score', 0)
+                try:
+                    total_score = float(total_score)
+                    if total_score.is_integer():
+                        total_score = int(total_score)
+                except:
+                    total_score = 0
+                
+                try:
+                    obj_score_sum = int(obj_score_sum)
+                except:
+                    obj_score_sum = 0
+                    
+                if not isinstance(total_score, (int, float)):
+                    total_score = 0
+                if not isinstance(obj_score_sum, (int, float)):
+                    obj_score_sum = 0
+                    
+                subj_score_sum = total_score - obj_score_sum
+                if subj_score_sum < 0: subj_score_sum = 0
+                
+                # Count objective correct/total
+                details = data.get('details', [])
+                obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                obj_total = len(obj_items)
+                obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
+                
+                data_dict = {
+                    '考场': db_info.get('room', ''),
+                    '座号': db_info.get('seat', ''),
+                    '班级': db_info.get('class', ''),
+                    '姓名': db_info.get('name', ''),
+                    '考号': db_info.get('id', ''),
+                    '总分': total_score,
+                    '信息一致性': consistency_note,
+                    '匹配项数': matches,
+                    'OCR姓名': data.get('ocr_name', ''),
+                    'OCR班级': data.get('ocr_class', ''),
+                    'OCR考场': data.get('ocr_room', ''),
+                    'OCR座号': data.get('ocr_seat', ''),
+                    'OCR手写考号': data.get('ocr_id_written', ''),
+                    'OCR填涂考号': data.get('ocr_id_filled', ''),
+                    '原始文件': data.get('original_image', ''),
+                    '客观题': obj_score_sum,
+                    '客观题正确数': obj_correct,
+                    '客观题总数': obj_total,
+                    '主观题': subj_score_sum,
+                    '复审状态': '已复审' if data.get('reviewed', False) else '未复审',
+                    '缺考标记': '是' if data.get('absent', False) else '否'
+                }
+                
+                self.write_summary_csv(data_dict)
+                
+            except Exception as e:
+                print(f"Error processing {jf} for CSV: {e}")
 
     def generate_report_content(self, data, db_student_info):
         student_name = db_student_info.get('name', '未知')
@@ -1239,6 +1471,13 @@ class App(ctk.CTk):
             md += f"  - 填涂考号: {ocr_id_filled}\n"
 
         # --- Score Summary ---
+        try:
+            total_score = float(total_score) if total_score else 0
+            if isinstance(total_score, float) and total_score.is_integer():
+                total_score = int(total_score)
+        except:
+            total_score = 0
+            
         subj_score_sum = total_score - obj_score_sum
         if subj_score_sum < 0: subj_score_sum = 0
         
@@ -1329,15 +1568,21 @@ class App(ctk.CTk):
         
         # --- 2. Subjective Questions ---
         if is_english:
-            md += "\n### 2. Subjective Questions\n"
+            md += f"\n### 2. Subjective Questions (Total Score: {subj_score_sum})\n"
         else:
-            md += "\n### 2. 主观题\n"
+            md += f"\n### 2. 主观题 (总分: {subj_score_sum})\n"
             
         sorted_keys = sorted(subjective_q.keys(), key=lambda x: int(x) if x.isdigit() else 999)
         
         for main_id in sorted_keys:
             items = subjective_q[main_id]
             main_total = sub_scores_dict.get(f"{main_id}", 0)
+            
+            # Add Main Question Header
+            if is_english:
+                md += f"\n#### Question {main_id} (Score: {main_total})\n"
+            else:
+                md += f"\n#### 第 {main_id} 题 (得分: {main_total})\n"
             
             for item in items:
                 q_id = item.get('question_id', '')
@@ -1351,18 +1596,267 @@ class App(ctk.CTk):
                 md += f"- **{q_id}**: {score}/{max_score}\n"
                 if is_english:
                     md += f"  - **Student Answer**: {student_text}\n"
-                    if scoring_points:
-                        md += f"  - **Scoring Points**: {scoring_points}\n"
-                    if error_analysis:
-                        md += f"  - **Analysis**: {error_analysis}\n"
+                    # Always show Scoring Points
+                    sp_text = scoring_points if scoring_points else "No scoring points"
+                    md += f"  - **Scoring Points**: {sp_text}\n"
+                    
+                    # Always show Analysis
+                    ea_text = error_analysis if error_analysis else "None"
+                    md += f"  - **Analysis**: {ea_text}\n"
+
+                    # Get standard answer from local key or item
+                    std_ans = self.answer_key.get(q_id) or item.get('standard_answer')
+                    if std_ans:
+                         md += f"  - **Correct Answer**: {std_ans}\n"
                 else:
                     md += f"  - **考生答案**: {student_text}\n"
-                    if scoring_points:
-                        md += f"  - **得分点**: {scoring_points}\n"
-                    if error_analysis:
-                        md += f"  - **失分原因**: {error_analysis}\n"
+                    # Always show Scoring Points
+                    sp_text = scoring_points if scoring_points else "无得分点"
+                    md += f"  - **得分点**: {sp_text}\n"
+                    
+                    # Always show Error Analysis
+                    ea_text = error_analysis if error_analysis else "无"
+                    md += f"  - **失分原因**: {ea_text}\n"
+                    
+                    # Get standard answer from local key or item
+                    std_ans = self.answer_key.get(q_id) or item.get('standard_answer')
+                    if std_ans:
+                         md += f"  - **正确答案**: {std_ans}\n"
+                
+                md += "\n"
 
         return md, sub_scores_dict, consistency_note, matches, obj_score_sum
+
+    def parse_rubric_for_answers(self):
+        """
+        Parses the loaded rubric to extract standard answers.
+        """
+        if not self.rubric_path: return
+        
+        # 1. Check for existing JSON in exam_folder
+        json_path = None
+        if self.exam_folder:
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_loaded"))
+                    return # Done
+                except Exception as e:
+                    self.log(f"Failed to load existing answer key: {e}")
+        
+        # 2. Extract from Rubric (if no JSON or load failed)
+        try:
+            with open(self.rubric_path, 'r', encoding='utf-8') as f:
+                rubric_text = f.read()
+            
+            self.log(self.t("log_extracting_answers"))
+            
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            if not api_key: return
+            
+            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            
+            # Use Concurrent Extraction & Consolidation
+            log_cb = lambda msg: self.after(0, lambda m=msg: self.log(m))
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=log_cb, t_func=self.t)
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=log_cb, t_func=self.t)
+            
+            count = len(final_key)
+            self.log(self.t("log_answers_extracted", count=count))
+            
+            # 3. Show Review Dialog (on Main Thread)
+            # We pass a callback to handle the saving after user confirms
+            self.after(0, lambda: self.show_standard_answer_dialog(final_key, report, json_path))
+            
+        except Exception as e:
+            self.log(f"Failed to extract answer key: {e}")
+
+    def show_standard_answer_dialog(self, initial_json, report, save_path):
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        def on_confirm(confirmed_json):
+            self.answer_key = confirmed_json
+            
+            # Recalculate save_path in case exam_folder was set after extraction
+            actual_save_path = save_path
+            if not actual_save_path and self.exam_folder:
+                actual_save_path = os.path.join(self.exam_folder, "answer_key.json")
+            
+            # Save to JSON
+            if actual_save_path:
+                try:
+                    with open(actual_save_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                    self.log(self.t("log_answer_key_saved"))
+                except Exception as e:
+                    self.log(f"Failed to save answer key: {e}")
+            else:
+                self.log("⚠️ Cannot save answer key: exam folder not selected yet.")
+        
+        StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
+
+    def show_standard_answer_dialog_with_callback(self, initial_json, report, save_path, callback):
+        """Show dialog with custom callback instead of default save behavior"""
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        def on_confirm(confirmed_json):
+            self.log(self.t("log_answer_key_confirmed"))
+            callback(confirmed_json)
+        
+        StandardAnswerReviewDialog(self, initial_json, report, on_confirm)
+
+    def regrade_all_objective(self):
+        """
+        Re-grade all objective questions based on (potentially updated) answer key.
+        """
+        if not self.exam_folder:
+            messagebox.showerror(self.t("title_error"), "Please select exam folder first.")
+            return
+        
+        if not hasattr(self, 'answer_key') or not self.answer_key:
+            # Try to load from file
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        self.answer_key = json.load(f)
+                    self.log(self.t("log_answer_key_found"))
+                except Exception as e:
+                    self.log(f"Failed to load answer key: {e}")
+            
+            # Check again
+            if not hasattr(self, 'answer_key') or not self.answer_key:
+                messagebox.showerror(self.t("title_error"), "No answer key found. Please load rubric first.")
+                return
+        
+        # Show Dialog to Edit Answer Key
+        from standard_answer_dialog import StandardAnswerReviewDialog
+        
+        old_key = copy.deepcopy(self.answer_key)
+        
+        def on_confirm_regrade(new_key):
+            self.answer_key = new_key
+            
+            # Save updated answer key to JSON
+            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                self.log(self.t("log_answer_key_saved"))
+            except Exception as e:
+                self.log(f"Failed to save updated answer key: {e}")
+            
+            # Detect Changes
+            changed_qids = []
+            for qid in set(list(old_key.keys()) + list(new_key.keys())):
+                if old_key.get(qid) != new_key.get(qid):
+                    changed_qids.append(qid)
+            
+            if not changed_qids:
+                messagebox.showinfo(self.t("title_success"), "No changes detected in answer key.")
+                return
+            
+            self.log(f"🔄 Answer key changes detected for Q: {', '.join(changed_qids)}")
+            self.log(f"🔄 Starting batch re-grading for all students...")
+            
+            # Start batch re-grading in thread
+            threading.Thread(target=self.batch_regrade_objective, args=(changed_qids,), daemon=True).start()
+        
+        # Show Review Dialog with current answer key
+        report = "Review and update the answer key below. Changes will trigger batch re-grading."
+        StandardAnswerReviewDialog(self, self.answer_key, report, on_confirm_regrade)
+    
+    def batch_regrade_objective(self, changed_qids):
+        """
+        Batch re-grade all students' objective questions.
+        """
+        reports_dir = os.path.join(self.exam_folder, "reports")
+        if not os.path.exists(reports_dir):
+            self.after(0, lambda: messagebox.showerror(self.t("title_error"), "Reports directory not found."))
+            return
+        
+        json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
+        total = len(json_files)
+        self.after(0, lambda: self.log(f"📊 Found {total} student records to process."))
+        
+        updated_count = 0
+        
+        for idx, json_file in enumerate(json_files):
+            json_path = os.path.join(reports_dir, json_file)
+            
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                details = data.get('details', [])
+                obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                
+                changed = False
+                log_entries = []
+                
+                for item in obj_items:
+                    qid = str(item.get('question_id', ''))
+                    if qid not in changed_qids:
+                        continue # Skip unchanged questions
+                    
+                    # Use student_answer (respects manual_override from review window)
+                    student_ans = item.get('student_answer', '')
+                    std_ans = self.answer_key.get(qid, '')
+                    max_score = item.get('max_score', 3)
+                    
+                    old_score = item.get('score', 0)
+                    new_score = max_score if student_ans == std_ans else 0
+                    
+                    if old_score != new_score:
+                        item['score'] = new_score
+                        log_entries.append(f"Q{qid}: {old_score} → {new_score}")
+                        changed = True
+                    
+                    # Update standard_answer in JSON to reflect new answer key
+                    item['standard_answer'] = std_ans
+                
+                if changed:
+                    # Recalculate Total
+                    total_score = sum(x.get('score', 0) for x in details)
+                    data['total_score'] = total_score
+                    
+                    # Add Log Entry
+                    log_entry = {
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "changes": ["Batch Re-grading"] + log_entries,
+                        "user": "System"
+                    }
+                    if 'review_logs' not in data:
+                        data['review_logs'] = []
+                    data['review_logs'].append(log_entry)
+                    
+                    # Save JSON
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    
+                    # Update Markdown
+                    md_path = json_path.replace('.json', '.md')
+                    db_info = data.get('db_student_info', {})
+                    md_content, _, _, _, _ = self.generate_report_content(data, db_info)
+                    with open(md_path, 'w', encoding='utf-8') as f:
+                        f.write(md_content)
+                    
+                    updated_count += 1
+                
+            except Exception as e:
+                self.after(0, lambda e=e, f=json_file: self.log(f"❌ Error processing {f}: {e}"))
+        
+        # Update CSV
+        # Update CSV (Regenerate to ensure consistency)
+        self.after(0, lambda: self.log("🔄 Updating summary CSV..."))
+        self.after(0, self.regenerate_summary_csv)
+        
+        # Done
+        self.after(0, lambda u=updated_count, t=total: self.log(f"✅ Batch re-grading complete. Updated {u}/{t} students."))
+        self.after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
+
 
     def save_markdown(self, data, original_filename, db_student_info):
         exam_room = db_student_info.get('room', '未知')

@@ -121,6 +121,7 @@ TRANSLATIONS = {
         "btn_save_profile": "💾 保存",
         "btn_delete_profile": "🗑️ 删除",
         "btn_review": "复审",
+        "btn_regrade_obj": "重评客观题",
         
         "msg_ready_start": "✨ 发现 {count} 个文件。就绪，请点击“开始阅卷”。",
         "profile_default_placeholder": "未保存的配置",
@@ -147,12 +148,26 @@ TRANSLATIONS = {
         "log_move_failed": "⚠️ 无法移动 {filename}: {error}",
         "log_file_done": "✅ {filename}",
         "log_start_failed_count": "🚀 启动处理，共 {total} 张，失败文件夹中有 {failed} 张",
+        
+        "log_checking_answer_key": "🔍 正在检测标准答案配置...",
+        "log_answer_key_found": "✅ 已找到标准答案配置。",
+        "log_answer_key_missing": "⚠️ 未找到标准答案配置，开始生成...",
+        "log_checking_layout": "🔍 正在检测答题卡布局配置...",
+        "log_layout_found": "✅ 已找到答题卡布局配置。",
+        "log_layout_missing": "⚠️ 未找到答题卡布局配置，开始检测...",
         "log_retry_failed": "🔄 正在重试 {count} 个失败文件...",
         "log_grading_stats": "📊 答题卡: {ti}, JSON: {jc}, Markdown: {mc}, CSV: {cr}",
         "log_loaded_layout": "📄 已加载保存的布局配置。",
         "log_reverifying": "🔄 正在重新校验缺失文件...",
         "log_regen_csv": "🔄 正在重新生成汇总 CSV...",
         "log_verify_counts": "📊 正在校验最终数量...",
+        "log_rubric_loaded": "📄 评分标准已加载。",
+        "log_extracting_answers": "🧠 正在从评分标准中提取标准答案...",
+        "log_answers_extracted": "✅ 已提取 {count} 个标准答案。",
+        "log_answer_key_loaded": "✅ 已从文件加载标准答案。",
+        "log_answer_key_saved": "💾 标准答案已保存至文件。",
+        "log_answer_key_waiting_confirm": "⏳ 标准答案等待确认...",
+        "log_answer_key_confirmed": "✅ 标准答案已确认。",
         
         "msg_no_profile_delete": "未选择要删除的配置",
         "msg_confirm_delete": "确定要删除配置 '{profile}' 吗？",
@@ -163,6 +178,11 @@ TRANSLATIONS = {
         "title_check_failed": "检查失败",
         "title_confirm": "确认",
         
+        "title_save_profile": "保存配置",
+        "msg_enter_profile_name": "请输入配置名称:",
+        "msg_overwrite_profile": "是否覆盖当前配置 '{name}'？\n点击“是”覆盖，点击“否”另存为新配置。",
+        "title_overwrite": "覆盖确认",
+        
         "btn_zoom_in": "➕",
         "btn_zoom_out": "➖",
         "btn_reset_zoom": "↺ 重置",
@@ -170,7 +190,7 @@ TRANSLATIONS = {
         "btn_right": "➡ 右移",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "主观题复审", # For the specific header issue
-        'lbl_review_details': "主观题详情",
+        'lbl_review_details': "复审详情",
         'chk_absence': "确认缺考",
         'msg_csv_permission_error': "无法写入 CSV 文件。请检查文件是否被 Excel 打开，关闭后重试。",
     
@@ -187,7 +207,19 @@ TRANSLATIONS = {
         "log_confirm_absence": "• 确认缺考: '{old}' -> '{new}'",
         "title_review_logs": "复审日志",
         "lbl_review_logs_title": "复审日志: {name}",
-        "lbl_reviewer": "复审员"
+        "lbl_reviewer": "复审员",
+        
+        # Answer Key Extraction Logs
+        "log_req_sent": "📤 标准答案分析请求 {index} 已发出",
+        "log_req_received": "📥 标准答案分析请求 {index} 已收到回复",
+        "log_req_all_received": "✅ 已收到全部标准答案分析请求 ({count}/3)",
+        "log_consolidation_sent": "📤 整合分析请求已发出",
+        "log_consolidation_received": "📥 整合分析请求已收到回复",
+        
+        "btn_get_models": "获取模型列表",
+        "btn_test_connection": "检查可用性",
+        "msg_test_success": "连接成功！模型可用。",
+        "msg_test_failed": "连接失败: {error}"
     },
     "EN": {
         "app_title": "AI Exam Grader",
@@ -343,6 +375,13 @@ TRANSLATIONS = {
         "log_reverifying": "🔄 Re-verifying missing files...",
         "log_regen_csv": "🔄 Regenerating Summary CSV...",
         "log_verify_counts": "📊 Verifying final counts...",
+        "log_rubric_loaded": "📄 Rubric loaded.",
+        "log_extracting_answers": "🧠 Extracting standard answers from rubric...",
+        "log_answers_extracted": "✅ Extracted {count} standard answers.",
+        "log_answer_key_loaded": "✅ Loaded answer key from file.",
+        "log_answer_key_saved": "💾 Answer key saved to file.",
+        "log_answer_key_waiting_confirm": "⏳ Waiting for answer key confirmation...",
+        "log_answer_key_confirmed": "✅ Answer key confirmed.",
         
         "msg_no_profile_delete": "No profile selected to delete",
         "msg_confirm_delete": "Delete profile '{profile}'?",
@@ -360,7 +399,7 @@ TRANSLATIONS = {
         "btn_right": "➡ Right",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "Subjective Review", # For the specific header issue
-        'lbl_review_details': "Subjective Details",
+        'lbl_review_details': "Review Details",
         'chk_absence': "Confirm Absence",
         'msg_csv_permission_error': "Cannot write to CSV file. Please close it if open in Excel and try again.",
     
@@ -377,6 +416,30 @@ TRANSLATIONS = {
         "log_confirm_absence": "• Confirm Absence: '{old}' -> '{new}'",
         "title_review_logs": "Review Logs",
         "lbl_review_logs_title": "Review Logs: {name}",
-        "lbl_reviewer": "Reviewer"
+        "lbl_reviewer": "Reviewer",
+        
+        # Answer Key Extraction Logs
+        "log_req_sent": "📤 Answer key analysis request {index} sent",
+        "log_req_received": "📥 Answer key analysis request {index} received",
+        "log_req_all_received": "✅ Received all answer key analysis responses ({count}/3)",
+        "log_consolidation_sent": "📤 Consolidation analysis request sent",
+        "log_consolidation_received": "📥 Consolidation analysis response received",
+        
+        "btn_get_models": "Get Models",
+        "btn_test_connection": "Test Connection",
+        "msg_test_success": "Connection successful! Model is available.",
+        "msg_test_failed": "Connection failed: {error}",
+        
+        "title_save_profile": "Save Profile",
+        "msg_enter_profile_name": "Enter profile name:",
+        "msg_overwrite_profile": "Overwrite current profile '{name}'?\nClick Yes to overwrite, No to save as new.",
+        "title_overwrite": "Confirm Overwrite",
+        
+        "log_checking_answer_key": "🔍 Checking answer key configuration...",
+        "log_answer_key_found": "✅ Answer key configuration found.",
+        "log_answer_key_missing": "⚠️ Answer key configuration not found, starting generation...",
+        "log_checking_layout": "🔍 Checking answer sheet layout configuration...",
+        "log_layout_found": "✅ Answer sheet layout configuration found.",
+        "log_layout_missing": "⚠️ Answer sheet layout configuration not found, starting detection..."
     }
 }
