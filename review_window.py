@@ -892,39 +892,40 @@ class ReviewWindow(ctk.CTkToplevel):
             stu_ans = item.get('student_answer', '')
             score = item.get('score', 0)
             
-            # Get Standard Answer
-            std_ans = item.get('standard_answer', '')
-            if hasattr(self.parent_app, 'answer_key') and self.parent_app.answer_key:
-                std_ans = self.parent_app.answer_key.get(q_id, std_ans)
+            # Display "-" for unanswered
+            if not stu_ans:
+                stu_ans = "-"
             
             # Color code
-            bg_color = "#106A38" if score > 0 else "#DC2626" # Green/Red
-            if score == 0 and not stu_ans: bg_color = "gray"
+            score_color = "#106A38" if score > 0 else "#DC2626" # Green/Red
+            if score == 0 and stu_ans == "-": score_color = "gray"
             
             card = ctk.CTkFrame(grid_frame, border_width=1, border_color="gray50")
             card.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
-            # Q ID
-            ctk.CTkLabel(card, text=f"Q{q_id}", font=("Arial", 10, "bold")).pack(pady=(2,0))
+            # Q ID (Chinese style with 顿号)
+            ctk.CTkLabel(card, text=f"{q_id}、", font=("Arial", 10, "bold")).pack(pady=(2,0))
             
-            # Entry for Student Answer
-            entry = ctk.CTkEntry(card, width=40, justify="center")
-            entry.insert(0, stu_ans)
-            entry.pack(pady=2)
-            entry.bind("<FocusOut>", lambda e, q=q_id, ent=entry: self.on_obj_answer_change(q, ent.get()))
-            entry.bind("<Return>", lambda e, q=q_id, ent=entry: self.on_obj_answer_change(q, ent.get()))
+            # Dropdown for Student Answer
+            answer_options = ["A", "B", "C", "D", "-"]
+            combo = ctk.CTkComboBox(card, values=answer_options, width=50, height=28, 
+                                   command=lambda choice, q=q_id: self.on_obj_answer_change(q, choice))
+            combo.set(stu_ans)
+            combo.pack(pady=2)
             
-            # Standard Answer Display
-            ctk.CTkLabel(card, text=f"Std: {std_ans}", font=("Arial", 10), text_color="gray70").pack(pady=(0,2))
-            
-            # Score Indicator (Small dot or text)
-            ctk.CTkLabel(card, text=f"{score} pts", font=("Arial", 10), text_color=bg_color).pack(pady=(0,2))
+            # Score Display (number only, no "pts")
+            ctk.CTkLabel(card, text=f"{score}", font=("Arial", 11, "bold"), text_color=score_color).pack(pady=(0,2))
 
         if show_buttons:
             self.add_step_buttons(parent)
 
     def on_obj_answer_change(self, q_id, new_ans):
-        new_ans = new_ans.strip().upper()
+        # Convert "-" to empty string internally
+        if new_ans == "-":
+            new_ans = ""
+        else:
+            new_ans = new_ans.strip().upper()
+        
         details = self.current_data.get('details', [])
         
         changed = False
@@ -943,7 +944,7 @@ class ReviewWindow(ctk.CTkToplevel):
                     max_score = item.get('max_score', 0)
                     if not max_score: max_score = 3 # Default fallback
                     
-                    if new_ans == std_ans:
+                    if new_ans and new_ans == std_ans:
                         item['score'] = max_score
                     else:
                         item['score'] = 0
