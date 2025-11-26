@@ -1086,7 +1086,8 @@ class App(ctk.CTk):
             sample_files = random.sample(files, sample_count)
             
             # 2. Detect concurrently
-            grader = AIGraderEngine(self.provider_var.get(), self.entry_key.get(), self.entry_base.get(), self.combo_model.get())
+            api_key = getattr(self, "current_api_key", self.entry_key.get())
+            grader = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             
             # Submit all detection tasks concurrently with 1 second stagger
             futures = []
