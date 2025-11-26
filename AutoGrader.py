@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 import platform
+from utils import sort_csv_headers
 import re
 import shutil
 import datetime
@@ -1075,31 +1076,9 @@ class App(ctk.CTk):
                             final_data[k] = val
                 except: pass
 
-        # Dynamic headers based on final_data keys
-        if is_en:
-            priority = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Absence Marker', 'Review Status', 'Total Score',
-                        'Objective Score', 'Subjective Score', 'Objective Correct', 'Objective Total']
-            ocr_priority = ['OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID', 'Consistency']
-        else:
-            priority = ['考场', '座号', '班级', '姓名', '考号', '缺考标记', '复审状态', '总分',
-                        '客观题', '主观题', '客观题正确数', '客观题总数']
-            ocr_priority = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号', '信息一致性']
-        
-        headers = list(final_data.keys())
-        # Only include priority fields that actually exist in data
-        priority_in_data = [h for h in priority if h in headers]
-        ocr_in_data = [h for h in ocr_priority if h in headers]
-        
-        # Remaining fields are usually subjective question details (e.g. "17(1)", "18")
-        remaining = [h for h in headers if h not in priority and h not in ocr_priority and h != ('Original File' if is_en else '原始文件')]
-        
-        def natural_sort_key(s):
-            return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
-        
-        remaining.sort(key=natural_sort_key)
-        
         # Final Order: Priority -> Subjective Details -> OCR Info -> Original File
-        sorted_headers = priority_in_data + remaining + ocr_in_data + [('Original File' if is_en else '原始文件')]
+        headers = list(final_data.keys())
+        sorted_headers = sort_csv_headers(headers)
 
         with self.write_lock:
             file_exists = os.path.isfile(csv_path)
@@ -1242,6 +1221,10 @@ class App(ctk.CTk):
             md += f"- **OCR Recognition**:\n"
             md += f"  - Name: {ocr_name}\n"
             md += f"  - Class: {ocr_class}\n"
+            md += f"  - Room: {ocr_room}\n"
+            md += f"  - Seat: {ocr_seat}\n"
+            md += f"  - Written ID: {ocr_id_written}\n"
+            md += f"  - Filled ID: {ocr_id_filled}\n"
         else:
             md += f"# 📝 阅卷报告\n\n"
             md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
@@ -1250,6 +1233,25 @@ class App(ctk.CTk):
             md += f"- **OCR识别**:\n"
             md += f"  - 姓名: {ocr_name}\n"
             md += f"  - 班级: {ocr_class}\n"
+            md += f"  - 考场: {ocr_room}\n"
+            md += f"  - 座号: {ocr_seat}\n"
+            md += f"  - 手写考号: {ocr_id_written}\n"
+            md += f"  - 填涂考号: {ocr_id_filled}\n"
+
+        # --- Score Summary ---
+        subj_score_sum = total_score - obj_score_sum
+        if subj_score_sum < 0: subj_score_sum = 0
+        
+        if is_english:
+            md += f"\n## 📊 Score Summary\n"
+            md += f"| Total Score | Objective | Subjective |\n"
+            md += f"| :---: | :---: | :---: |\n"
+            md += f"| **{total_score}** | {obj_score_sum} | {subj_score_sum} |\n\n"
+        else:
+            md += f"\n## 📊 成绩汇总\n"
+            md += f"| 总分 | 客观题 | 主观题 |\n"
+            md += f"| :---: | :---: | :---: |\n"
+            md += f"| **{total_score}** | {obj_score_sum} | {subj_score_sum} |\n\n"
         
         # --- 1. Objective Questions ---
         obj_correct_count = len([x for x in objective_q if x.get('score', 0) > 0])

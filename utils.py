@@ -40,21 +40,24 @@ def sort_csv_headers(headers: list) -> list:
         
         # 2. Status
         '复审状态', 'Review Status',
-        '确认缺考', 'Confirm Absence',
         '缺考标记', 'Absence Marker',
+        '确认缺考', 'Confirm Absence',
         
         # 3. Scores
         '总分', 'Total Score',
         '客观题', 'Objective Score',
-        '主观题', 'Subjective Score',
         '客观题正确数', 'Objective Correct',
         '客观题总数', 'Objective Total',
+        '主观题', 'Subjective Score',
         
         # 4. Question Scores (Will be sorted naturally after these if not in list)
         # 5. Details (Info Consistency, Match Count)
         # 6. OCR Fields
     ]
     
+    def natural_key(text):
+        return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', text)]
+
     def header_sort_key(h):
         # 1. Priority List
         if h in priority:
@@ -70,6 +73,7 @@ def sort_csv_headers(headers: list) -> list:
             return (3, h)
             
         # 2. Questions (Everything else, e.g. "17", "18")
-        return (1, h)
+        # Use natural sort key for questions
+        return (1, natural_key(h))
     
     return sorted(headers, key=header_sort_key)
