@@ -13,10 +13,17 @@
 **AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed for teachers and educators. It leverages the visual understanding capabilities of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers and generate detailed reports.
 
 > [!IMPORTANT]
-> **License Notice**: This project is licensed under the **[NCEL-Strict+ License (Version 1.1)](LICENSE)**.
-> - Any use for **commercial purposes**, profit, or remuneration requires a commercial license.
-> - For non-commercial use, you must **retain the original attribution** and **cannot change the license type**.
-> - For commercial licensing, please contact: **nicofiela@outlook.com**
+> **License Notice**
+>
+> This project is licensed under the **[NCEL-Strict+ License (Version 1.3)](./LICENSE)**.
+> This is a **Source Available** but **Strictly Limited** non-commercial license.
+>
+> 🚫 **Commercial Use Strictly Prohibited**: Includes sale, subscription, sponsorship, **Internal Use**, SaaS services, and AI model training.
+> 🚫 **Distribution of Modified Versions Prohibited**: You may **NOT** directly distribute modified source code or binaries (only Patch/Diff files are allowed).
+> ✅ **Non-Commercial Only**: Personal study, academic research, and non-commercial use must retain the full copyright notice and license file.
+>
+> 💼 **Commercial License**:
+> For commercial use or custom development, please contact the author for licensing: [nicofiela@outlook.com](mailto:nicofiela@outlook.com)
 
 ## ✨ Features
 
