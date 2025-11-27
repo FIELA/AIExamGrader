@@ -88,6 +88,7 @@ class ReviewWindow(ctk.CTkToplevel):
         
         self.last_confirm_time = 0 # For debounce
         self.chk_absence_var = ctk.BooleanVar() # Variable for absence checkbox
+        self.log_window = None # Singleton reference for log window
         
         self.load_file_list()
         self.setup_ui()
@@ -1588,6 +1589,12 @@ class ReviewWindow(ctk.CTkToplevel):
 
     def show_review_logs(self):
         """Show popup with review logs"""
+        # Singleton check
+        if self.log_window and self.log_window.winfo_exists():
+            self.log_window.lift()
+            self.log_window.focus_force()
+            return
+
         logs = self.current_data.get('review_logs', [])
         
         if not logs:
@@ -1675,8 +1682,11 @@ class ReviewWindow(ctk.CTkToplevel):
             
         # Create Popup
         top = ctk.CTkToplevel(self)
+        self.log_window = top
         top.title(self.t("title_review_logs"))
         top.geometry("500x400")
+        top.lift()
+        top.focus_force()
         
         # Title
         student_name = self.current_data.get('db_student_info', {}).get('name', 'Unknown')

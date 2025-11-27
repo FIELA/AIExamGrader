@@ -13,10 +13,17 @@
 **AI Exam Grader** 是一款基于大语言模型（LLM）的智能阅卷助手，专为教师和教育工作者设计。它利用 **OpenAI (GPT-4o)** 或 **Google Gemini (Pro)** 的强大视觉理解能力，自动批改手写答题卡，生成详细的评分报告。
 
 > [!IMPORTANT]
-> **授权说明**: 本项目采用 **[NCEL-Strict+ License (Version 1.1)](LICENSE)**。
-> - 任何以 **商业、营利或获取报酬** 为目的的使用均需获得 **商业授权**。
-> - 非商业目的的使用 **不得移除署名** 或 **更改授权许可类型**。
-> - 商业授权联系: **nicofiela@outlook.com**
+> **授权说明 (License Notice)**
+>
+> 本项目采用 **[NCEL-Strict+ License (Version 1.3)](./LICENSE)** 进行授权。
+> 这是一个 **源码可见 (Source Available)** 但 **严格受限** 的非商业协议。
+>
+> 🚫 **严禁商业使用**：包括销售、订阅、赞助、**企业内部使用 (Internal Use)**、SaaS 服务及 AI 模型训练。
+> 🚫 **禁止分发修改版**：您**不**可以直接发布修改后的源代码或二进制文件（仅允许分享 Patch/Diff 文件）。
+> ✅ **仅限非商用**：个人学习、学术研究及非商业用途需保留完整的版权声明与许可文件。
+>
+> 💼 **商业授权 / Commercial License**：
+> 如需商用或定制开发，请联系作者获取授权：[nicofiela@outlook.com](mailto:nicofiela@outlook.com)
 
 ## ✨ 核心功能
 
