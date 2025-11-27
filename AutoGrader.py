@@ -956,7 +956,7 @@ class App(ctk.CTk):
             
             # Prompt to fix
             if messagebox.askyesno(self.t("msg_incomplete_title"), self.t("msg_incomplete_body", msg=msg)):
-                self.start_targeted_grading(list(missing_set))
+                self.start_grading_thread()
 
     def ensure_jsons_exist(self):
         """
