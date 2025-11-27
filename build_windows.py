@@ -23,10 +23,10 @@ print(f"CustomTkinter path: {ctk_path}")
 args = [
     'AutoGrader.py',  # Main script
     '--name=AI Exam Grader',  # App name
+    '--onefile',  # Create a single executable file (CRITICAL for single .exe)
     '--windowed',  # No console window
     '--noconfirm',  # Overwrite output directory
     '--clean',  # Clean cache
-    '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     '--icon=assets/icon.ico',  # Windows icon (needs .ico format)
     f'--add-data={ctk_data_arg}',  # Include customtkinter assets
     '--add-data=assets;assets',  # Include assets folder (for runtime icon)
@@ -90,8 +90,9 @@ add_metadata('google-auth')
 # Run PyInstaller
 try:
     PyInstaller.__main__.run(args)
-    print(f"\n✅ Build successful! The application is located in 'dist/AI Exam Grader.exe'")
-    print(f"📦 You can distribute the entire 'dist/AI Exam Grader' folder")
+    print(f"\n✅ Build successful! Single executable created!")
+    print(f"📦 Location: 'dist/AI Exam Grader.exe'")
+    print(f"💡 This is a standalone .exe file - no _internal folder needed!")
 except Exception as e:
     print(f"\n❌ Build failed: {e}")
     sys.exit(1)

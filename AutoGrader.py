@@ -27,14 +27,35 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Hide main window initially
+        self.withdraw()
+        
+        # Show Splash Screen
+        try:
+            from splash_screen import SplashScreen
+            splash = SplashScreen(self)
+            splash.update_progress(0, "Initializing application...")
+        except Exception as e:
+            print(f"Failed to load splash screen: {e}")
+            splash = None
+
         self.title("AI Exam Grader")
         self.geometry("1200x820")
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
         
+        # Update splash progress
+        if splash:
+            splash.update_progress(20, "Loading icons...")
+            self.update() # Force UI update
+        
         # Load Icons
         self.load_icons()
 
+        if splash:
+            splash.update_progress(40, "Loading configuration...")
+            self.update()
+        
         self.config_manager = ConfigManager()
         self.student_manager = StudentManager()
         
@@ -64,6 +85,10 @@ class App(ctk.CTk):
         self.layout_description = None
         self.template_confirmed = False
         
+        if splash:
+            splash.update_progress(50, "Setting up window...")
+            self.update()
+        
         # Set App Icon
         try:
             icon_path = self.resource_path(os.path.join("assets", "icon.png"))
@@ -72,19 +97,47 @@ class App(ctk.CTk):
                 from PIL import ImageTk
                 icon_img = ImageTk.PhotoImage(file=icon_path)
                 self.wm_iconphoto(True, icon_img)
-                # Also try setting it for macOS dock if possible (often requires packaging, but this helps window)
         except Exception as e:
             print(f"Warning: Could not set app icon: {e}")
 
+        if splash:
+            splash.update_progress(60, "Building user interface...")
+            self.update()
+        
         self.setup_ui()
+        
+        if splash:
+            splash.update_progress(80, "Loading translations...")
+            self.update()
+        
         self.load_initial_config()
         self.update_ui_text() # Apply initial language
+        
+        if splash:
+            splash.update_progress(95, "Finalizing...")
+            self.update()
         
         if platform.system() == "Darwin":
             self.apply_mac_paste_fix(self.entry_key)
             self.apply_mac_paste_fix(self.entry_base)
             try: self.apply_mac_paste_fix_to_widget(self.combo_model._entry)
             except: pass
+
+        # Initialization complete
+        if splash:
+            splash.update_progress(100, "Ready!")
+            self.update()
+            # Small delay to let user see 100%
+            import time
+            time.sleep(0.5)
+            splash.close()
+        
+        # Show main window
+        self.deiconify()
+
+
+
+
 
     def resource_path(self, relative_path):
         """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -357,8 +410,9 @@ class App(ctk.CTk):
         self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), image=self.icons.get("review"), fg_color=Theme.INFO, hover_color=Theme.PRIMARY_HOVER, text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_review_window, anchor="center")
         self.btn_review.pack(side="left", padx=8, pady=5, expand=True, fill="x")
         
-        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), image=self.icons.get("refresh"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
+        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
         self.btn_regrade_obj.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+
 
         # Stats
         self.stats_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
@@ -2602,6 +2656,7 @@ class TemplateConfirmDialog(ctk.CTkToplevel):
         new_desc = self.textbox.get("1.0", "end-1c")
         self.on_confirm(new_desc)
         self.destroy()
+
 
 if __name__ == "__main__":
     app = App()
