@@ -41,20 +41,21 @@ class App(ctk.CTk):
 
         self.title("AI Exam Grader")
         self.geometry("1200x820")
+        self.center_window(1200, 820)
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
         
         # Update splash progress
         if splash:
             splash.update_progress(20, "Loading icons...")
-            self.update() # Force UI update
+            splash.update() # Force splash update
         
         # Load Icons
         self.load_icons()
 
         if splash:
             splash.update_progress(40, "Loading configuration...")
-            self.update()
+            splash.update()
         
         self.config_manager = ConfigManager()
         self.student_manager = StudentManager()
@@ -87,35 +88,48 @@ class App(ctk.CTk):
         
         if splash:
             splash.update_progress(50, "Setting up window...")
-            self.update()
+            splash.update()
         
         # Set App Icon
         try:
-            icon_path = self.resource_path(os.path.join("assets", "icon.png"))
-            if os.path.exists(icon_path):
-                # Use ImageTk for window icon
-                from PIL import ImageTk
-                icon_img = ImageTk.PhotoImage(file=icon_path)
-                self.wm_iconphoto(True, icon_img)
+            # On Windows, use .ico for better taskbar integration
+            if sys.platform.startswith("win"):
+                icon_path_ico = self.resource_path(os.path.join("assets", "icon.ico"))
+                if os.path.exists(icon_path_ico):
+                    self.iconbitmap(icon_path_ico)
+                else:
+                    # Fallback to PNG if ICO missing
+                    icon_path = self.resource_path(os.path.join("assets", "icon.png"))
+                    if os.path.exists(icon_path):
+                        from PIL import ImageTk
+                        icon_img = ImageTk.PhotoImage(file=icon_path)
+                        self.wm_iconphoto(True, icon_img)
+            else:
+                # On Mac/Linux, use PNG
+                icon_path = self.resource_path(os.path.join("assets", "icon.png"))
+                if os.path.exists(icon_path):
+                    from PIL import ImageTk
+                    icon_img = ImageTk.PhotoImage(file=icon_path)
+                    self.wm_iconphoto(True, icon_img)
         except Exception as e:
             print(f"Warning: Could not set app icon: {e}")
 
         if splash:
             splash.update_progress(60, "Building user interface...")
-            self.update()
+            splash.update()
         
         self.setup_ui()
         
         if splash:
             splash.update_progress(80, "Loading translations...")
-            self.update()
+            splash.update()
         
         self.load_initial_config()
         self.update_ui_text() # Apply initial language
         
         if splash:
             splash.update_progress(95, "Finalizing...")
-            self.update()
+            splash.update()
         
         if platform.system() == "Darwin":
             self.apply_mac_paste_fix(self.entry_key)
@@ -126,14 +140,22 @@ class App(ctk.CTk):
         # Initialization complete
         if splash:
             splash.update_progress(100, "Ready!")
-            self.update()
+            splash.update()
             # Small delay to let user see 100%
             import time
             time.sleep(0.5)
+            
+            # Show main window FIRST before destroying splash
+            # This ensures we never have 0 visible windows
+            self.deiconify()
+            self.center_window(1200, 820) # Re-center to be sure
+            self.update()
+            
+            # Now close splash
             splash.close()
-        
-        # Show main window
-        self.deiconify()
+        else:
+            self.deiconify()
+            self.center_window(1200, 820)
 
 
 
@@ -169,7 +191,7 @@ class App(ctk.CTk):
 
     def load_icons(self):
         self.icons = {}
-        icon_names = ["start", "pause", "stop", "review", "folder", "document"]
+        icon_names = ["start", "pause", "stop", "review", "folder", "document", "refresh"]
         
         def process_icon(img, color=None):
             """
@@ -231,8 +253,8 @@ class App(ctk.CTk):
             if os.path.exists(path):
                 pil_img = Image.open(path)
                 
-                # For solid buttons (Start, Pause, Stop, Folder, Document, Review), use White icons
-                if name in ["start", "pause", "stop", "folder", "document", "review"]:
+                # For solid buttons (Start, Pause, Stop, Folder, Document, Review, Refresh), use White icons
+                if name in ["start", "pause", "stop", "folder", "document", "review", "refresh"]:
                     processed_img = process_icon(pil_img, (255, 255, 255))
                     self.icons[name] = ctk.CTkImage(light_image=processed_img, dark_image=processed_img, size=(20, 20))
             else:
@@ -270,6 +292,9 @@ class App(ctk.CTk):
         except Exception: return None
 
     def setup_ui(self):
+        # Handle window close
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         # Configure grid layout (1x2)
         self.grid_columnconfigure(0, minsize=260, weight=0) # Enforce fixed sidebar width
         self.grid_columnconfigure(1, weight=1)
@@ -390,28 +415,32 @@ class App(ctk.CTk):
         # 2. Dashboard / Controls
         self.dashboard_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.dashboard_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        self.dashboard_frame.grid_columnconfigure(0, weight=1)
-        self.dashboard_frame.grid_columnconfigure(1, weight=1)
+        self.dashboard_frame.grid_columnconfigure(0, weight=4) # Give more space to controls
+        self.dashboard_frame.grid_columnconfigure(1, weight=1, minsize=180) # Ensure stats visible
 
         # Controls
         self.controls_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
         self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         
+        # Configure grid for equal button widths (5 buttons)
+        for i in range(5):
+            self.controls_card.grid_columnconfigure(i, weight=1)
+
         # Ultra Compact buttons: height 40, pady 5
         self.btn_start = ctk.CTkButton(self.controls_card, text=self.t("btn_start"), image=self.icons.get("start"), fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.start_grading_thread, anchor="center")
-        self.btn_start.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        self.btn_start.grid(row=0, column=0, padx=4, pady=5, sticky="ew")
         
         self.btn_pause = ctk.CTkButton(self.controls_card, text=self.t("btn_pause"), image=self.icons.get("pause"), fg_color=Theme.WARNING, hover_color=Theme.WARNING_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, state="disabled", command=self.toggle_pause, anchor="center")
-        self.btn_pause.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        self.btn_pause.grid(row=0, column=1, padx=4, pady=5, sticky="ew")
         
         self.btn_stop = ctk.CTkButton(self.controls_card, text=self.t("btn_stop"), image=self.icons.get("stop"), fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER, text_color="#FFFFFF", text_color_disabled="#E0E0E0", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, state="disabled", command=self.stop_grading, anchor="center")
-        self.btn_stop.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        self.btn_stop.grid(row=0, column=2, padx=4, pady=5, sticky="ew")
 
         self.btn_review = ctk.CTkButton(self.controls_card, text=self.t("btn_review"), image=self.icons.get("review"), fg_color=Theme.INFO, hover_color=Theme.PRIMARY_HOVER, text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_review_window, anchor="center")
-        self.btn_review.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        self.btn_review.grid(row=0, column=3, padx=4, pady=5, sticky="ew")
         
-        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
-        self.btn_regrade_obj.pack(side="left", padx=8, pady=5, expand=True, fill="x")
+        self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), image=self.icons.get("refresh"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
+        self.btn_regrade_obj.grid(row=0, column=4, padx=4, pady=5, sticky="ew")
 
 
         # Stats
@@ -683,6 +712,7 @@ class App(ctk.CTk):
             self.btn_pause.configure(text=self.t("btn_resume"))
         self.btn_stop.configure(text=self.t("btn_stop"))
         self.btn_review.configure(text=self.t("btn_review"))
+        self.btn_regrade_obj.configure(text=self.t("btn_regrade_obj"))
         
         self.update_progress_ui() # Update progress text
 
@@ -1028,6 +1058,15 @@ class App(ctk.CTk):
         self.log(self.t("log_layout_missing"))
         self.start_detection_thread(callback)
 
+    def on_closing(self):
+        if messagebox.askokcancel(self.t("title_quit"), self.t("msg_quit_confirm")):
+            try:
+                self.stop_grading()
+            except:
+                pass
+            self.destroy()
+            os._exit(0)
+
     def start_grading_thread(self):
         if not self.rubric_path or not self.exam_folder:
             messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
@@ -1040,12 +1079,13 @@ class App(ctk.CTk):
         self.log(self.t("log_checking_answer_key"))
         
         # Check and generate answer key if needed (BEFORE grading)
-        # Chain: Answer Key -> Layout -> Grading
-        self.ensure_answer_key_and_run(lambda: self.ensure_layout_and_run(self._run_grading_process))
+        # Chain: Answer Key -> Layout -> CSV -> Grading
+        self.ensure_answer_key_and_run(lambda: self.ensure_layout_and_run(lambda: self.ensure_csv_and_run(self._run_grading_process)))
     
     def ensure_answer_key_and_run(self, callback):
         """Ensure answer key exists before running callback"""
         # Check if answer_key.json exists
+        key_loaded = False
         if self.exam_folder:
             json_path = os.path.join(self.exam_folder, "answer_key.json")
             if os.path.exists(json_path):
@@ -1053,12 +1093,14 @@ class App(ctk.CTk):
                     with open(json_path, 'r', encoding='utf-8') as f:
                         self.answer_key = json.load(f)
                     self.log(self.t("log_answer_key_found"))
-                    # Answer key exists, proceed to callback
-                    callback()
-                    return
+                    key_loaded = True
                 except Exception as e:
                     self.log(f"Failed to load existing answer key: {e}")
         
+        if key_loaded:
+            callback()
+            return
+    
         # No answer key found, need to extract
         self.log(self.t("log_answer_key_missing"))
         if not self.rubric_path:
@@ -1100,6 +1142,11 @@ class App(ctk.CTk):
                         with open(json_path, 'w', encoding='utf-8') as f:
                             json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
                         self.log(self.t("log_answer_key_saved"))
+                        
+                        # Trigger CSV generation immediately
+                        self.generate_csv_headers_from_key()
+                        self.log(self.t("log_csv_generated_waiting"))
+                        
                     except Exception as e:
                         self.log(f"Failed to save answer key: {e}")
                 
@@ -1112,6 +1159,60 @@ class App(ctk.CTk):
         except Exception as e:
             self.after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
             self.after(0, lambda: messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {e}"))
+
+    def ensure_csv_and_run(self, callback):
+        """Ensure CSV exists before running callback"""
+        csv_en = "Grade_Summary.csv"
+        csv_cn = "成绩汇总表.csv"
+        path_en = os.path.join(self.exam_folder, csv_en)
+        path_cn = os.path.join(self.exam_folder, csv_cn)
+        
+        if os.path.exists(path_en) or os.path.exists(path_cn):
+            callback()
+            return
+
+        # Not exists, generate headers
+        self.log("Generating CSV headers...")
+        self.generate_csv_headers_from_key()
+        self.log(self.t("log_csv_generated_waiting"))
+        callback()
+
+    def generate_csv_headers_from_key(self):
+        """Generate CSV with headers based on answer key"""
+        if not self.answer_key: return
+        
+        # Construct dummy data_dict with all keys
+        data_dict = {
+            '考场': '', '座号': '', '班级': '', '姓名': '', '考号': '',
+            '总分': 0, '信息一致性': '', '匹配项数': 0,
+            'OCR姓名': '', 'OCR班级': '', 'OCR考场': '', 'OCR座号': '',
+            'OCR手写考号': '', 'OCR填涂考号': '',
+            '原始文件': '', '客观题': 0, '客观题正确数': 0, '客观题总数': 0,
+            '主观题': 0, '复审状态': '', '缺考标记': '', '确认缺考': ''
+        }
+        
+        # Add Objective
+        for item in self.answer_key:
+            if isinstance(item, dict) and item.get('type') == 'objective':
+                qid = str(item.get('id', ''))
+                data_dict[f"Q{qid} Answer"] = ''
+                data_dict[f"Q{qid} Score"] = 0
+        
+        # Add Subjective
+        main_q_ids = set()
+        for item in self.answer_key:
+            if isinstance(item, dict) and item.get('type') == 'subjective':
+                qid = str(item.get('id', ''))
+                data_dict[f"Q{qid}"] = 0
+                
+                match = re.match(r"(\d+)", qid)
+                if match:
+                    main_q_ids.add(match.group(1))
+        
+        for m_id in main_q_ids:
+            data_dict[f"Q{m_id} Total"] = 0
+            
+        self.write_summary_csv(data_dict)
 
     def _run_grading_process(self):
         self.processing = True
@@ -1244,14 +1345,21 @@ class App(ctk.CTk):
             '确认缺考': 'Confirm Absence'
         }
         
-        # Translate data_dict keys if EN
+        # Translate data_dict keys if EN, or translate dynamic keys if CN
         final_data = {}
         if is_en:
             for k, v in data_dict.items():
                 new_key = header_map.get(k, k)
                 final_data[new_key] = v
         else:
-            final_data = data_dict
+            # For Chinese, we need to translate dynamic keys (Qx Total -> Qx 总分)
+            for k, v in data_dict.items():
+                new_key = k
+                if k.startswith("Q"):
+                    new_key = new_key.replace(" Total", " 总分")
+                    new_key = new_key.replace(" Answer", " 答案")
+                    new_key = new_key.replace(" Score", " 得分")
+                final_data[new_key] = v
 
         # Numeric Conversion for Excel
         for k, v in final_data.items():
@@ -1276,9 +1384,57 @@ class App(ctk.CTk):
                             final_data[k] = val
                 except: pass
 
-        # Final Order: Priority -> Subjective Details -> OCR Info -> Original File
+        # Final Order: Priority -> Subjective Details -> Objective Details -> Others -> Original File
         headers = list(final_data.keys())
-        sorted_headers = sort_csv_headers(headers)
+        
+        def custom_sort(key):
+            # Define order priority
+            fixed_order = [
+                'Room', 'Seat', 'Class', 'Name', 'ID',
+                '考场', '座号', '班级', '姓名', '考号',
+                'Review Status', 'Absence Marker', 'Confirm Absence',
+                '复审状态', '缺考标记', '确认缺考',
+                'Total Score', 'Objective Score', 'Subjective Score',
+                '总分', '客观题', '主观题',
+                'Objective Correct', 'Objective Total',
+                '客观题正确数', '客观题总数'
+            ]
+            
+            if key in fixed_order:
+                return (0, fixed_order.index(key))
+                
+            # Subjective Main Totals: Q17 Total / Q17 总分
+            if ("Total" in key or "总分" in key) and key.startswith("Q"):
+                try:
+                    num = int(re.search(r"Q(\d+)", key).group(1))
+                    return (1, num)
+                except: pass
+                
+            # Subjective Sub-questions: Q17(1)
+            if "(" in key and key.startswith("Q"):
+                 try:
+                    parts = re.search(r"Q(\d+)\((\d+)\)", key)
+                    if parts:
+                        return (2, int(parts.group(1)), int(parts.group(2)))
+                 except: pass
+                
+            # Objective Details: Q1 Answer/Score / Q1 答案/得分
+            if key.startswith("Q") and ("Answer" in key or "Score" in key or "答案" in key or "得分" in key) and ("Total" not in key and "总分" not in key):
+                try:
+                    num = int(re.search(r"Q(\d+)", key).group(1))
+                    # Group Answer then Score for same question
+                    is_score = 1 if ("Score" in key or "得分" in key) else 0
+                    return (3, num, is_score)
+                except: pass
+                
+            # Original File (Last)
+            if key in ['Original File', '原始文件']:
+                return (5, 0)
+                
+            # Others (Review Status, OCR, etc.) - Before Original File
+            return (4, key)
+
+        sorted_headers = sorted(headers, key=custom_sort)
 
         with self.write_lock:
             file_exists = os.path.isfile(csv_path)
@@ -1426,6 +1582,46 @@ class App(ctk.CTk):
                     '缺考标记': '是' if data.get('absent', False) else '',
                     '确认缺考': confirm_absence_display
                 }
+
+                # --- Add Detailed Scores ---
+                
+                # 1. Subjective Details
+                subj_items = [x for x in details if "主观" in x.get('type', '') or "填空" in x.get('type', '') or "简答" in x.get('type', '')]
+                main_q_scores = {}
+                
+                for item in subj_items:
+                    qid = str(item.get('question_id', ''))
+                    score = item.get('score', 0)
+                    
+                    # Sub-question score (e.g. Q17(1))
+                    data_dict[f"Q{qid}"] = score
+                    
+                    # Aggregate for Main Question Total (e.g. 17(1) -> 17)
+                    # Try to find the main number
+                    match = re.match(r"(\d+)", qid)
+                    if match:
+                        main_id = match.group(1)
+                        main_q_scores[main_id] = main_q_scores.get(main_id, 0) + score
+                
+                # Add Main Question Totals to dict
+                for m_id, total in main_q_scores.items():
+                    data_dict[f"Q{m_id} Total"] = total
+
+                # 2. Objective Details
+                # Sort obj items by question id to be safe
+                def get_q_num(x):
+                    try: return int(re.search(r"(\d+)", str(x.get('question_id', '0'))).group(1))
+                    except: return 0
+                obj_items.sort(key=get_q_num)
+                
+                for item in obj_items:
+                    qid = str(item.get('question_id', ''))
+                    # Use robust answer extraction
+                    ans = item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')
+                    score = item.get('score', 0)
+                    
+                    data_dict[f"Q{qid} Answer"] = ans
+                    data_dict[f"Q{qid} Score"] = score
                 
                 self.write_summary_csv(data_dict)
                 
@@ -1628,7 +1824,7 @@ class App(ctk.CTk):
                     md += f"| {label_q_id} | " + " | ".join([str(item.get('question_id')).center(4) for item in group]) + " |\n"
                 
                 # Row: Student answers
-                md += f"| {label_s_ans} | " + " | ".join([str(item.get('student_answer', '')).center(4) for item in group]) + " |\n"
+                md += f"| {label_s_ans} | " + " | ".join([str(item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')).center(4) for item in group]) + " |\n"
                 
                 # Row: Results
                 results = [f"{'✅' if item.get('score', 0) > 0 else '❌'}".center(4) for item in group]
@@ -1659,7 +1855,7 @@ class App(ctk.CTk):
             
             for item in items:
                 q_id = item.get('question_id', '')
-                student_answer = item.get('student_answer', '')
+                student_answer = item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')
                 student_text = student_answer if isinstance(student_answer, str) else str(student_answer)
                 max_score = item.get('max_score', 0)
                 score = item.get('score', 0)
@@ -1892,8 +2088,12 @@ class App(ctk.CTk):
                 
                 if changed:
                     # Recalculate Total
+                    old_total_score = data.get('total_score', 0)
                     total_score = sum(x.get('score', 0) for x in details)
                     data['total_score'] = total_score
+                    
+                    if old_total_score != total_score:
+                        log_entries.append(f"Total Score: {old_total_score} → {total_score}")
                     
                     # Add Log Entry
                     log_entry = {
@@ -2003,6 +2203,43 @@ class App(ctk.CTk):
             '信息一致性': consistency_note
         }
         summary_data.update(sub_scores_dict)
+
+        # --- Add Detailed Scores (Sync with regenerate_summary_csv) ---
+        
+        # 1. Subjective Details
+        subj_items = [x for x in details if "主观" in x.get('type', '') or "填空" in x.get('type', '') or "简答" in x.get('type', '')]
+        main_q_scores = {}
+        
+        for item in subj_items:
+            qid = str(item.get('question_id', ''))
+            score = item.get('score', 0)
+            
+            # Sub-question score (e.g. Q17(1))
+            summary_data[f"Q{qid}"] = score
+            
+            # Aggregate for Main Question Total (e.g. 17(1) -> 17)
+            match = re.match(r"(\d+)", qid)
+            if match:
+                main_id = match.group(1)
+                main_q_scores[main_id] = main_q_scores.get(main_id, 0) + score
+        
+        # Add Main Question Totals
+        for m_id, total in main_q_scores.items():
+            summary_data[f"Q{m_id} Total"] = total
+
+        # 2. Objective Details
+        def get_q_num(x):
+            try: return int(re.search(r"(\d+)", str(x.get('question_id', '0'))).group(1))
+            except: return 0
+        objective_q.sort(key=get_q_num)
+        
+        for item in objective_q:
+            qid = str(item.get('question_id', ''))
+            ans = item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')
+            score = item.get('score', 0)
+            
+            summary_data[f"Q{qid} Answer"] = ans
+            summary_data[f"Q{qid} Score"] = score
         
         self.write_summary_csv(summary_data)
 
@@ -2618,6 +2855,18 @@ class App(ctk.CTk):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_summaries)
+
+    def center_window(self, width, height):
+        """Center the window on the screen"""
+        try:
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            x = (screen_width // 2) - (width // 2)
+            y = (screen_height // 2) - (height // 2)
+            self.geometry(f'{width}x{height}+{x}+{y}')
+        except Exception as e:
+            print(f"Failed to center window: {e}")
+            self.geometry(f'{width}x{height}')
 
     def reset_ui_state(self):
         self.btn_start.configure(state="normal")

@@ -286,8 +286,6 @@ class ReviewWindow(ctk.CTkToplevel):
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
-        self.canvas.bind("<Enter>", lambda e: self.canvas.config(cursor="hand2"))
-        self.canvas.bind("<Leave>", lambda e: self.canvas.config(cursor=""))
 
         # --- Right: Report & Controls ---
         self.right_panel = ctk.CTkFrame(self.main_frame)
@@ -377,11 +375,38 @@ class ReviewWindow(ctk.CTkToplevel):
         self.right_panel = ctk.CTkFrame(self.main_frame)
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         
+        # Layout: Scrollable Frame (Left) + Buttons (Right)
+        self.right_panel.grid_columnconfigure(0, weight=1)
+        self.right_panel.grid_columnconfigure(1, weight=0)
+        self.right_panel.grid_rowconfigure(0, weight=1)
+        
         self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text=self.t("lbl_review_details"))
-        self.subj_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        self.subj_scroll.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=5)
+        
+        # Scroll Buttons Frame
+        self.scroll_btn_frame = ctk.CTkFrame(self.right_panel, width=50, fg_color="transparent")
+        self.scroll_btn_frame.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
+        
+        # Center buttons vertically
+        self.scroll_btn_frame.grid_rowconfigure(0, weight=1)
+        self.scroll_btn_frame.grid_rowconfigure(3, weight=1)
+        
+        self.btn_move_up = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_up"), width=40, command=self.scroll_text_top)
+        self.btn_move_up.grid(row=1, column=0, pady=10)
+        
+        self.btn_move_down = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_down"), width=40, command=self.scroll_text_bottom)
+        self.btn_move_down.grid(row=2, column=0, pady=10)
         
         # Enable global mouse wheel scrolling
         self.setup_global_scroll()
+
+    def scroll_text_top(self):
+        try: self.subj_scroll._parent_canvas.yview_moveto(0.0)
+        except: pass
+
+    def scroll_text_bottom(self):
+        try: self.subj_scroll._parent_canvas.yview_moveto(1.0)
+        except: pass
 
     # --- Navigation Methods ---
     def next_student(self):
