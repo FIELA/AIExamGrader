@@ -1186,7 +1186,8 @@ class App(ctk.CTk):
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
             '原始文件': 'Original File', '客观题': 'Objective Score',
             '客观题正确数': 'Objective Correct', '客观题总数': 'Objective Total',
-            '主观题': 'Subjective Score', '复审状态': 'Review Status', '缺考标记': 'Absence Marker'
+            '主观题': 'Subjective Score', '复审状态': 'Review Status', '缺考标记': 'Absence Marker',
+            '确认缺考': 'Confirm Absence'
         }
         
         # Translate data_dict keys if EN
@@ -1330,6 +1331,23 @@ class App(ctk.CTk):
                 obj_total = len(obj_items)
                 obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
                 
+                # Determine Review Status based on review_count
+                review_count = data.get('review_count', 0)
+                if review_count == 0:
+                    review_status = ""
+                elif review_count == 1:
+                    review_status = "已复审"
+                else:
+                    review_status = "已二次复审"
+                
+                # Get Confirm Absence and translate if needed
+                confirm_absence_value = data.get('confirm_absence', '')
+                # If value is "Yes", display as "确认缺考" for Chinese CSV
+                if confirm_absence_value == 'Yes':
+                    confirm_absence_display = "确认缺考"
+                else:
+                    confirm_absence_display = confirm_absence_value
+                
                 data_dict = {
                     '考场': db_info.get('room', ''),
                     '座号': db_info.get('seat', ''),
@@ -1345,13 +1363,14 @@ class App(ctk.CTk):
                     'OCR座号': data.get('ocr_seat', ''),
                     'OCR手写考号': data.get('ocr_id_written', ''),
                     'OCR填涂考号': data.get('ocr_id_filled', ''),
-                    '原始文件': data.get('original_image', ''),
+                    '原始文件': data.get('original_image', '') or data.get('original_filename', ''),
                     '客观题': obj_score_sum,
                     '客观题正确数': obj_correct,
                     '客观题总数': obj_total,
                     '主观题': subj_score_sum,
-                    '复审状态': '已复审' if data.get('reviewed', False) else '未复审',
-                    '缺考标记': '是' if data.get('absent', False) else '否'
+                    '复审状态': review_status,
+                    '缺考标记': '是' if data.get('absent', False) else '',
+                    '确认缺考': confirm_absence_display
                 }
                 
                 self.write_summary_csv(data_dict)
@@ -2419,7 +2438,8 @@ class App(ctk.CTk):
             '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
-            '复审状态': 'Review Status', '缺考标记': 'Absence Marker', '确认缺考': 'Confirm Absence'
+            '复审状态': 'Review Status', '缺考标记': 'Absence Marker', '确认缺考': 'Confirm Absence',
+            '原始文件': 'Original File'
         }
         
         for jf in json_files:
@@ -2438,6 +2458,18 @@ class App(ctk.CTk):
                 elif review_count >= 2:
                     review_status = "Second Review" if is_en else "已二次复审"
                 
+                # Get Confirm Absence with proper translation
+                confirm_absence_value = data.get('confirm_absence', '')
+                if is_en:
+                    # English CSV: keep "Yes" or empty
+                    confirm_absence_display = confirm_absence_value
+                else:
+                    # Chinese CSV: translate "Yes" to "确认缺考"
+                    if confirm_absence_value == 'Yes':
+                        confirm_absence_display = "确认缺考"
+                    else:
+                        confirm_absence_display = confirm_absence_value
+                
                 summary = {
                     '考场': db_info.get('room', '未知'), 
                     '座号': db_info.get('seat', '未知'), 
@@ -2455,14 +2487,14 @@ class App(ctk.CTk):
                     'OCR填涂考号': data.get('ocr_id_filled', ''),
                     '复审状态': review_status,
                     '缺考标记': data.get('缺考标记', ''),
-                    '确认缺考': data.get('confirm_absence', ''),
+                    '确认缺考': confirm_absence_display,
+                    '原始文件': data.get('original_image', '') or data.get('original_filename', ''),
                     '客观题': obj_score_sum
                 }
                 
                 # Translate Absence Markers if EN
                 if is_en:
                     if summary.get('缺考标记') == '是': summary['缺考标记'] = 'Yes'
-                    if summary.get('确认缺考') == '是': summary['确认缺考'] = 'Yes'
                     
                 summary.update(sub_scores_dict)
                 
@@ -2498,10 +2530,12 @@ class App(ctk.CTk):
         
         # Determine headers
         if is_en:
-            base_headers = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Total Score', 'Consistency', 'Matches', 'Review Status']
+            base_headers = ['Room', 'Seat', 'Class', 'Name', 'ID', 'Total Score', 'Consistency', 'Matches', 
+                           'Review Status', 'Absence Marker', 'Confirm Absence', 'Original File']
             ocr_headers = ['OCR Name', 'OCR Class', 'OCR Room', 'OCR Seat', 'OCR Written ID', 'OCR Filled ID']
         else:
-            base_headers = ['考场', '座号', '班级', '姓名', '考号', '总分', '信息一致性', '匹配项数', '复审状态']
+            base_headers = ['考场', '座号', '班级', '姓名', '考号', '总分', '信息一致性', '匹配项数', 
+                           '复审状态', '缺考标记', '确认缺考', '原始文件']
             ocr_headers = ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号']
         
         # Collect all dynamic keys (subjective scores)

@@ -1502,11 +1502,13 @@ class ReviewWindow(ctk.CTkToplevel):
                         status_str = "Second Review" if is_en else "已二次复审"
                         
                     row[status_key] = status_str
-                    
+                
                     # Update Confirm Absence
-                    is_confirmed = self.current_data.get('confirm_absence') == '是'
-                    if is_confirmed:
-                        row[confirm_key] = 'Confirm Absence' if is_en else '确认缺考'
+                    # Note: confirm_absence is stored as 'Yes' or '' in JSON
+                    confirm_absence_value = self.current_data.get('confirm_absence', '')
+                    if confirm_absence_value == 'Yes':
+                        # Translate to localized format
+                        row[confirm_key] = 'Yes' if is_en else '确认缺考'
                     else:
                         row[confirm_key] = ''
                     
