@@ -41,6 +41,7 @@ class App(ctk.CTk):
 
         self.title("AI Exam Grader")
         self.geometry("1200x820")
+        self.center_window(1200, 820)
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
         
@@ -2618,6 +2619,18 @@ class App(ctk.CTk):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_summaries)
+
+    def center_window(self, width, height):
+        """Center the window on the screen"""
+        try:
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            x = (screen_width // 2) - (width // 2)
+            y = (screen_height // 2) - (height // 2)
+            self.geometry(f'{width}x{height}+{x}+{y}')
+        except Exception as e:
+            print(f"Failed to center window: {e}")
+            self.geometry(f'{width}x{height}')
 
     def reset_ui_state(self):
         self.btn_start.configure(state="normal")

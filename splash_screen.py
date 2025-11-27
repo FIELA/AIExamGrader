@@ -28,13 +28,9 @@ class SplashScreen(ctk.CTkToplevel):
         width = 500
         height = 300
         
-        # Get screen dimensions from parent or default
-        if parent:
-            screen_width = parent.winfo_screenwidth()
-            screen_height = parent.winfo_screenheight()
-        else:
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
+        # Get screen dimensions
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
             
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
