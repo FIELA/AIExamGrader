@@ -52,6 +52,11 @@ def create_icon():
     
     img.save("assets/icon.png")
     print("Icon generated at assets/icon.png")
+    
+    # Save as ICO for Windows
+    # ICO files can contain multiple sizes
+    img.save("assets/icon.ico", format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+    print("Icon generated at assets/icon.ico")
 
 if __name__ == "__main__":
     create_icon()

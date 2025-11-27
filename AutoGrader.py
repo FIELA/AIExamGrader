@@ -92,12 +92,25 @@ class App(ctk.CTk):
         
         # Set App Icon
         try:
-            icon_path = self.resource_path(os.path.join("assets", "icon.png"))
-            if os.path.exists(icon_path):
-                # Use ImageTk for window icon
-                from PIL import ImageTk
-                icon_img = ImageTk.PhotoImage(file=icon_path)
-                self.wm_iconphoto(True, icon_img)
+            # On Windows, use .ico for better taskbar integration
+            if sys.platform.startswith("win"):
+                icon_path_ico = self.resource_path(os.path.join("assets", "icon.ico"))
+                if os.path.exists(icon_path_ico):
+                    self.iconbitmap(icon_path_ico)
+                else:
+                    # Fallback to PNG if ICO missing
+                    icon_path = self.resource_path(os.path.join("assets", "icon.png"))
+                    if os.path.exists(icon_path):
+                        from PIL import ImageTk
+                        icon_img = ImageTk.PhotoImage(file=icon_path)
+                        self.wm_iconphoto(True, icon_img)
+            else:
+                # On Mac/Linux, use PNG
+                icon_path = self.resource_path(os.path.join("assets", "icon.png"))
+                if os.path.exists(icon_path):
+                    from PIL import ImageTk
+                    icon_img = ImageTk.PhotoImage(file=icon_path)
+                    self.wm_iconphoto(True, icon_img)
         except Exception as e:
             print(f"Warning: Could not set app icon: {e}")
 
