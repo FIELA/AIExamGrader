@@ -48,14 +48,14 @@ class App(ctk.CTk):
         # Update splash progress
         if splash:
             splash.update_progress(20, "Loading icons...")
-            self.update() # Force UI update
+            splash.update() # Force splash update
         
         # Load Icons
         self.load_icons()
 
         if splash:
             splash.update_progress(40, "Loading configuration...")
-            self.update()
+            splash.update()
         
         self.config_manager = ConfigManager()
         self.student_manager = StudentManager()
@@ -88,7 +88,7 @@ class App(ctk.CTk):
         
         if splash:
             splash.update_progress(50, "Setting up window...")
-            self.update()
+            splash.update()
         
         # Set App Icon
         try:
@@ -103,20 +103,20 @@ class App(ctk.CTk):
 
         if splash:
             splash.update_progress(60, "Building user interface...")
-            self.update()
+            splash.update()
         
         self.setup_ui()
         
         if splash:
             splash.update_progress(80, "Loading translations...")
-            self.update()
+            splash.update()
         
         self.load_initial_config()
         self.update_ui_text() # Apply initial language
         
         if splash:
             splash.update_progress(95, "Finalizing...")
-            self.update()
+            splash.update()
         
         if platform.system() == "Darwin":
             self.apply_mac_paste_fix(self.entry_key)
@@ -127,7 +127,7 @@ class App(ctk.CTk):
         # Initialization complete
         if splash:
             splash.update_progress(100, "Ready!")
-            self.update()
+            splash.update()
             # Small delay to let user see 100%
             import time
             time.sleep(0.5)
