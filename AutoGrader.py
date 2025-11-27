@@ -131,10 +131,18 @@ class App(ctk.CTk):
             # Small delay to let user see 100%
             import time
             time.sleep(0.5)
+            
+            # Show main window FIRST before destroying splash
+            # This ensures we never have 0 visible windows
+            self.deiconify()
+            self.center_window(1200, 820) # Re-center to be sure
+            self.update()
+            
+            # Now close splash
             splash.close()
-        
-        # Show main window
-        self.deiconify()
+        else:
+            self.deiconify()
+            self.center_window(1200, 820)
 
 
 

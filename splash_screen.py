@@ -31,17 +31,6 @@ class SplashScreen(ctk.CTkToplevel):
         # Get screen dimensions
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        
-        # Windows-specific fix for high DPI / multi-monitor
-        if sys.platform.startswith("win"):
-            try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                user32.SetProcessDPIAware()
-                screen_width = user32.GetSystemMetrics(0)
-                screen_height = user32.GetSystemMetrics(1)
-            except Exception:
-                pass
             
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
