@@ -50,13 +50,65 @@ def create_icon():
     
     draw.polygon(points, fill=(255, 215, 0)) # Gold sparkle
     
-    img.save("assets/icon.png")
-    print("Icon generated at assets/icon.png")
-    
     # Save as ICO for Windows
     # ICO files can contain multiple sizes
     img.save("assets/icon.ico", format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
     print("Icon generated at assets/icon.ico")
 
+def create_refresh_icon():
+    size = (64, 64) # Standard icon size
+    # Icon color: White (since buttons have colored background)
+    # But wait, the button has a purple background (#7C3AED). White icon is good.
+    icon_color = (255, 255, 255, 255)
+    
+    img = Image.new('RGBA', size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Draw two arrows forming a circle
+    center_x, center_y = 32, 32
+    radius = 20
+    width = 6
+    
+    import math
+    
+    # Arrow 1 (Top-Right to Bottom-Left)
+    start_angle = -30
+    end_angle = 150
+    
+    # Draw arc
+    draw.arc([center_x-radius, center_y-radius, center_x+radius, center_y+radius], start=start_angle, end=end_angle, fill=icon_color, width=width)
+    
+    # Arrowhead 1
+    # End point of arc
+    end_rad = math.radians(end_angle)
+    end_x = center_x + radius * math.cos(end_rad)
+    end_y = center_y + radius * math.sin(end_rad)
+    
+    # Arrowhead points
+    # Simple triangle
+    draw.polygon([(end_x, end_y-8), (end_x, end_y+8), (end_x-10, end_y)], fill=icon_color)
+    
+    # Arrow 2 (Bottom-Left to Top-Right)
+    start_angle2 = 150
+    end_angle2 = 330
+    
+    draw.arc([center_x-radius, center_y-radius, center_x+radius, center_y+radius], start=start_angle2, end=end_angle2, fill=icon_color, width=width)
+    
+    # Arrowhead 2
+    end_rad2 = math.radians(end_angle2)
+    end_x2 = center_x + radius * math.cos(end_rad2)
+    end_y2 = center_y + radius * math.sin(end_rad2)
+    
+    draw.polygon([(end_x2, end_y2-8), (end_x2, end_y2+8), (end_x2+10, end_y2)], fill=icon_color)
+
+    # Ensure directory exists
+    import os
+    if not os.path.exists("assets/icons"):
+        os.makedirs("assets/icons")
+        
+    img.save("assets/icons/refresh.png")
+    print("Refresh icon generated at assets/icons/refresh.png")
+
 if __name__ == "__main__":
     create_icon()
+    create_refresh_icon()

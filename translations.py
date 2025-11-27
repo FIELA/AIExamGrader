@@ -48,6 +48,8 @@ TRANSLATIONS = {
         "msg_finished": "\n✨ 全部完成！",
         "msg_complete_title": "完成",
         "msg_complete_body": "阅卷任务已完成。",
+        "title_quit": "退出",
+        "msg_quit_confirm": "确定要退出程序吗？",
         "msg_error": "🔥 发生错误: {error}",
         
         "lbl_language": "语言 / Language:",
@@ -165,8 +167,9 @@ TRANSLATIONS = {
         "log_extracting_answers": "🧠 正在从评分标准中提取标准答案...",
         "log_answers_extracted": "✅ 已提取 {count} 个标准答案。",
         "log_answer_key_loaded": "✅ 已从文件加载标准答案。",
-        "log_answer_key_saved": "💾 标准答案已保存至文件。",
-        "log_answer_key_waiting_confirm": "⏳ 标准答案等待确认...",
+        "log_answer_key_saved": "✅ 标准答案已保存",
+        "log_csv_generated_waiting": "✅ 成绩汇总csv已生成，等待阅卷",
+        "log_answer_key_waiting_confirm": "⏳ 等待用户确认标准答案...",
         "log_answer_key_confirmed": "✅ 标准答案已确认。",
         
         "msg_no_profile_delete": "未选择要删除的配置",
@@ -183,11 +186,13 @@ TRANSLATIONS = {
         "msg_overwrite_profile": "是否覆盖当前配置 '{name}'？\n点击“是”覆盖，点击“否”另存为新配置。",
         "title_overwrite": "覆盖确认",
         
-        "btn_zoom_in": "➕",
-        "btn_zoom_out": "➖",
-        "btn_reset_zoom": "↺ 重置",
+        "btn_zoom_in": "放大",
+        "btn_zoom_out": "缩小",
+        "btn_reset_zoom": "重置",
         "btn_left": "⬅ 左移",
         "btn_right": "➡ 右移",
+        "btn_move_up": "⬆ 上移",
+        "btn_move_down": "⬇ 下移",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "主观题复审", # For the specific header issue
         'lbl_review_details': "复审详情",
@@ -270,6 +275,8 @@ TRANSLATIONS = {
         "msg_finished": "\n✨ Finished!",
         "msg_complete_title": "Done",
         "msg_complete_body": "Grading Complete.",
+        "title_quit": "Exit",
+        "msg_quit_confirm": "Are you sure you want to quit?",
         "msg_error": "🔥 Error: {error}",
         
         "lbl_language": "Language / 语言:",
@@ -343,6 +350,7 @@ TRANSLATIONS = {
         "btn_save_profile": "💾 Save",
         "btn_delete_profile": "🗑️ Delete",
         "btn_review": "Review",
+        "btn_regrade_obj": "Regrade Obj.",
         
         "msg_ready_start": "✨ Found {count} files. Ready to start grading.",
         "profile_default_placeholder": "Unsaved Config",
@@ -379,8 +387,9 @@ TRANSLATIONS = {
         "log_extracting_answers": "🧠 Extracting standard answers from rubric...",
         "log_answers_extracted": "✅ Extracted {count} standard answers.",
         "log_answer_key_loaded": "✅ Loaded answer key from file.",
-        "log_answer_key_saved": "💾 Answer key saved to file.",
-        "log_answer_key_waiting_confirm": "⏳ Waiting for answer key confirmation...",
+        "log_answer_key_saved": "✅ Answer Key Saved",
+        "log_csv_generated_waiting": "✅ Grade Summary CSV Generated, Waiting for Grading",
+        "log_answer_key_waiting_confirm": "⏳ Waiting for user to confirm answer key...",
         "log_answer_key_confirmed": "✅ Answer key confirmed.",
         
         "msg_no_profile_delete": "No profile selected to delete",
@@ -392,11 +401,13 @@ TRANSLATIONS = {
         "title_check_failed": "Check Failed",
         "title_confirm": "Confirm",
         
-        "btn_zoom_in": "➕",
-        "btn_zoom_out": "➖",
-        "btn_reset_zoom": "↺ Reset",
+        "btn_zoom_in": "Zoom In",
+        "btn_zoom_out": "Zoom Out",
+        "btn_reset_zoom": "Reset",
         "btn_left": "⬅ Left",
         "btn_right": "➡ Right",
+        "btn_move_up": "⬆ Top",
+        "btn_move_down": "⬇ Bottom",
         "lbl_zoom": "{scale}%",
         "lbl_subj_review_header": "Subjective Review", # For the specific header issue
         'lbl_review_details': "Review Details",

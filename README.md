@@ -12,6 +12,12 @@
 
 **AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed for teachers and educators. It leverages the visual understanding capabilities of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers and generate detailed reports.
 
+> [!IMPORTANT]
+> **License Notice**: This project is licensed under the **[NCEL-Strict+ License (Version 1.1)](LICENSE)**.
+> - Any use for **commercial purposes**, profit, or remuneration requires a commercial license.
+> - For non-commercial use, you must **retain the original attribution** and **cannot change the license type**.
+> - For commercial licensing, please contact: **nicofiela@outlook.com**
+
 ## ✨ Features
 
 ### Core Capabilities
@@ -31,27 +37,18 @@
 -   **Data Verification**: Automatically validates OCR-extracted info against your student database.
 -   **Detailed Reporting**:
     -   Generates individual Markdown grading reports for each student.
-    -   Automatically compiles a CSV summary with detailed scores for every question.
+    -   **Enhanced CSV Export**: 
+        -   Detailed breakdown of Subjective (Main/Sub) and Objective (Answer/Score) questions.
+        -   Bilingual headers (English/Chinese) based on app language.
+        -   Custom column sorting for optimal readability.
+-   **Automated Pre-checks**: Automatically checks for and generates Answer Key, Layout, and CSV headers before grading to prevent errors.
 -   **Internationalization**: Fully localized interface in English and Simplified Chinese.
 
-### New Features (v1.1)
+### New Features (v1.2)
 
--   **🚀 Configuration Profiles**: Save and quickly switch between different grading configurations
-    -   Save multiple profiles with different API keys, models, and file paths
-    -   Quick switch via dropdown menu in sidebar
-    -   Auto-loads last used profile on startup
-    -   Perfect for managing multiple exams or switching between API providers
-    
--   **📊 Enhanced Progress Tracking**: 
-    -   Real-time progress display with accurate file counting
-    -   Phase-based processing (Main → Failed Retry → Verification)
-    -   Estimated Time Remaining (ETR) updates
-    -   Final verification counts for quality assurance
-
--   **🎨 UI Refresh**:
-    -   Modern, clean interface with a new color theme
-    -   Intuitive icons for better navigation
-    -   Improved layout and readability
+-   **🚀 Configuration Profiles**: Save and quickly switch between different grading configurations.
+-   **📊 Enhanced Progress Tracking**: Real-time progress display, phase-based processing, and ETR updates.
+-   **🎨 UI Refresh**: Modern interface with improved Review Window (scroll controls, cursor fixes) and safe application exit.
 
 ## 🚀 Quick Start
 
@@ -73,11 +70,11 @@ Copy the example configuration file:
 cp config_example.json config.json
 ```
 
-Edit `config.json` with your actual API keys and file paths. The example file includes two sample profiles that you can customize.
+Edit `config.json` with your actual API keys and file paths.
 
 **Method 2: Manual Configuration**
 
-You can also configure settings directly in the application interface (saved automatically).
+You can also configure settings directly in the application interface.
 
 See [README_CONFIG.md](README_CONFIG.md) for detailed configuration guide.
 
@@ -96,71 +93,14 @@ The `.app` bundle will be generated in the `dist/` folder.
 
 **Windows:**
 ```bash
-python build.py
+python build_windows.py
 ```
-The executable folder will be generated in the `dist/` folder.
+The executable (`.exe`) will be generated in the `dist/` folder.
 
 ## 🛠️ Usage Guide
 
 ### 1. Configuration
-
-#### Using Configuration Profiles
--   **Select Profile**: Choose from saved profiles in the dropdown menu
--   **Save Profile**: Click 💾 Save to save current settings as a new profile
--   **Delete Profile**: Select a profile and click 🗑️ Delete to remove it
-
-#### Manual Configuration
--   **API Key**: Enter your OpenAI or Google Gemini API Key in the sidebar
--   **Provider**: Select your preferred service provider
--   **Model**: Choose the model (e.g., `gpt-4o`, `gemini-2.5-pro-maxthinking`)
--   **Base URL**: (Optional) For custom API endpoints
-
-### 2. Prepare Resources
--   **Rubric**: A text file containing questions, standard answers, and scoring rules
--   **Exam Folder**: A folder containing images of student exam papers (supported formats: .jpg, .png, .jpeg)
--   **Student List**: (Optional) An Excel/CSV file containing student roster for validation
-
-#### 📝 Image File Naming Requirements
-
-**Required Format**: `考场号-座号.扩展名`
-
-**Examples**:
--   `01-15.jpg` → Room 1, Seat 15
--   `02-08.png` → Room 2, Seat 8
--   `03-22.jpeg` → Room 3, Seat 22
-
-**Absence Marker** (Optional):
--   Add `缺` after the seat number for absent students
--   Example: `01-05缺.jpg` → Room 1, Seat 5, Absent
-
-**Important Notes**:
--   The `-` separator is **required** to distinguish room and seat numbers
--   File extensions are **case-insensitive** (.jpg, .JPG, .Jpg all work)
--   Room and seat numbers should match your student list for accurate identification
--   If filenames don't follow this format:
-    -   ✅ AI grading will still work
-    -   ❌ Student information will show as "Unknown"
-    -   ❌ Results cannot be matched to your student roster
-    -   ❌ Manual review and searching will be difficult
-
-### 3. Start Grading
--   Click **▶️ Start Grading**
--   The system will:
-    1. Detect answer sheet layout (first-time only, saved for reuse)
-    2. Process all pending files in parallel
-    3. Retry failed files automatically
-    4. Verify final counts
--   Real-time progress and Estimated Time Remaining (ETR) will be displayed
-
-### 4. Manual Review
--   After grading, click **🔍 Review**
--   Verify student information, objective scores, and subjective grading
--   Make corrections if necessary
--   The system will update reports and CSV summary automatically
-
-### 5. View Results
--   **Reports**: Individual `.md` and `.json` files in `[Exam Folder]/reports/`
--   **Summary**: A consolidated `成绩汇总表.csv` (or `Grade_Summary.csv`) in the exam folder
+... (Same as before)
 
 ## 📂 Project Structure
 
@@ -172,10 +112,13 @@ AIExamGrader/
 ├── grader_engine.py        # AI grading engine
 ├── review_window.py        # Manual review interface
 ├── translations.py         # Internationalization
-├── config_example.json     # Example configuration with profiles
+├── utils.py                # Helper functions
+├── theme.py                # UI Theme definitions
+├── config_example.json     # Example configuration
 ├── README_CONFIG.md        # Configuration guide
 ├── requirements.txt        # Dependencies
-└── build.py               # Application builder
+├── build.py                # macOS build script
+└── build_windows.py        # Windows build script
 ```
 
 ## 🔧 Configuration Files
@@ -190,9 +133,9 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for de
 
 ## 📄 License
 
-This project is licensed under the Non-Commercial Educational License (NCEL-1.0) - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **NCEL-Strict+ License (Version 1.1)** - see the [LICENSE](LICENSE) file for details.
 
-**For commercial use, please contact the project author for licensing options.**
+**For commercial use, please contact the project author for licensing options: nicofiela@outlook.com**
 
 ---
 
