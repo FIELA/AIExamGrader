@@ -1061,7 +1061,7 @@ class App(ctk.CTk):
     def on_closing(self):
         if messagebox.askokcancel(self.t("title_quit"), self.t("msg_quit_confirm")):
             try:
-                self.stop_grading()
+                self.stop_grading(silent=True)
             except:
                 pass
             self.destroy()
@@ -1306,8 +1306,11 @@ class App(ctk.CTk):
             self.btn_pause.configure(text=self.t("btn_pause"), fg_color="#D97706")
             self.log(self.t("msg_resumed"))
 
-    def stop_grading(self):
-        if messagebox.askyesno(self.t("title_confirm"), self.t("msg_confirm_stop")):
+    def stop_grading(self, silent=False):
+        if not self.processing:
+            return
+
+        if silent or messagebox.askyesno(self.t("title_confirm"), self.t("msg_confirm_stop")):
             self.stop_event.set()
             self.pause_event.set() # Ensure threads can wake up to exit
             self.log(self.t("msg_stopping"))
