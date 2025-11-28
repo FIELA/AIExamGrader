@@ -73,7 +73,7 @@ class App(ctk.CTk):
         self.processing = False
         self.write_lock = threading.RLock()  # Use RLock for reentrant locking
         self.completed_count = 0
-        self.completed_count = 0
+
         self.total_files = 0
         
         self.answer_key = {} # Store standard answers locally
@@ -292,6 +292,46 @@ class App(ctk.CTk):
             widget.bind("<Command-a>", lambda e: widget.select_range(0, 'end'))
         except Exception as e:
             print(f"Error applying fix to widget: {e}")
+
+        except Exception as e:
+            print(f"Error applying fix to widget: {e}")
+
+    def get_folder_path(self, key):
+        """
+        Get the path for a specific folder type (grading_data, reports, etc.)
+        Checks for existing folders in both languages, defaults to current language.
+        key: 'grading_data', 'original_files', 'reports', 'success', 'failed'
+        """
+        if not self.exam_folder: return None
+        
+        # Define possible names (EN, CN)
+        # We could load from translations, but hardcoding here ensures we know what to look for
+        # regardless of current loaded language file state.
+        names_map = {
+            'grading_data': ['grading_data', '阅卷数据'],
+            'original_files': ['original_files', '原始文件'],
+            'reports': ['reports', '阅卷报告'],
+            'success': ['success', '成功归档'],
+            'failed': ['failed', '失败归档']
+        }
+        
+        possible_names = names_map.get(key, [key])
+        
+        # 1. Check if any exist
+        for name in possible_names:
+            path = os.path.join(self.exam_folder, name)
+            if os.path.exists(path):
+                return path
+                
+        # 2. If none exist, return path based on current language
+        # Get translation key
+        trans_key = f"dir_{key}"
+        folder_name = self.t(trans_key)
+        # Fallback if translation missing (shouldn't happen if translations.py updated)
+        if folder_name == trans_key: 
+            folder_name = possible_names[0] # Default to EN
+            
+        return os.path.join(self.exam_folder, folder_name)
 
     def paste_event_handler(self, event):
         try:
@@ -563,6 +603,7 @@ class App(ctk.CTk):
             self.apply_profile(profile_data)
             # Update last_used in config
             self.config_manager.set("last_used", choice)
+            self.log_separator()
             self.log(self.t("log_loaded_profile", profile=choice))
     
     def save_current_profile(self):
@@ -589,6 +630,7 @@ class App(ctk.CTk):
             if messagebox.askyesno(self.t("title_overwrite"), self.t("msg_overwrite_profile", name=current_profile)):
                 # Overwrite
                 self.config_manager.save_profile(current_profile, profile_data)
+                self.log_separator()
                 self.log(self.t("log_saved_profile", profile=current_profile))
                 return
         
@@ -605,6 +647,7 @@ class App(ctk.CTk):
         # Update dropdown
         self.combo_profile.configure(values=self.config_manager.get_profile_names())
         self.combo_profile.set(profile_name)
+        self.log_separator()
         self.log(self.t("log_saved_profile", profile=profile_name))
     
     def delete_current_profile(self):
@@ -670,22 +713,45 @@ class App(ctk.CTk):
             self.combo_model.set(profile_data["model"])
         
         # Set file paths
+        # Rubric
         if "rubric_path" in profile_data and profile_data["rubric_path"]:
             self.rubric_path = profile_data["rubric_path"]
             if os.path.exists(self.rubric_path):
                 self.lbl_rubric_status.configure(text=os.path.basename(self.rubric_path), text_color=("green", "lightgreen"))
+            else:
+                self.lbl_rubric_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
+        else:
+            # Explicitly clear if not in profile or empty
+            self.rubric_path = None
+            self.lbl_rubric_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
         
+        # Exam Folder
         if "exam_folder" in profile_data and profile_data["exam_folder"]:
             self.exam_folder = profile_data["exam_folder"]
             if os.path.exists(self.exam_folder):
                 self.lbl_folder_status.configure(text=os.path.basename(self.exam_folder), text_color=("green", "lightgreen"))
+            else:
+                self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
+        else:
+            # Explicitly clear
+            self.exam_folder = None
+            self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
         
+        # Student List
         if "student_list" in profile_data and profile_data["student_list"]:
             student_path = profile_data["student_list"]
             if os.path.exists(student_path):
                 count = self.student_manager.load_from_file(student_path)
                 if count > 0:
                     self.lbl_list_status.configure(text=self.t("status_students", count=count), text_color=("green", "lightgreen"))
+            else:
+                self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
+        else:
+            # Explicitly clear
+            if hasattr(self, "student_manager"):
+                self.student_manager.student_path = None
+                self.student_manager.students = []
+            self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
 
 
     def t(self, key, **kwargs):
@@ -886,13 +952,25 @@ class App(ctk.CTk):
         csv_data = set() # Stores (Room, Seat) tuples
         csv_filenames = set() # Stores Original Filenames
         
+        # Check grading_data first, then root
+        grading_data_dir = os.path.join(self.exam_folder, "grading_data")
         csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
         csv_path = None
+        
+        # Try grading_data first
         for name in csv_names:
-            p = os.path.join(self.exam_folder, name)
+            p = os.path.join(grading_data_dir, name)
             if os.path.exists(p):
                 csv_path = p
                 break
+        
+        # Fallback to root
+        if not csv_path:
+            for name in csv_names:
+                p = os.path.join(self.exam_folder, name)
+                if os.path.exists(p):
+                    csv_path = p
+                    break
                 
         if csv_path:
             try:
@@ -924,6 +1002,7 @@ class App(ctk.CTk):
         
         reports_dir = os.path.join(self.exam_folder, "reports")
         failed_dir = os.path.join(self.exam_folder, "failed")
+        success_dir = os.path.join(self.exam_folder, "success") # New success folder
         
         checked_count = 0
         for filename in images:
@@ -1041,9 +1120,17 @@ class App(ctk.CTk):
 
         # Check Failed Folder
         if os.path.exists(failed_dir):
-            try:
-                failed_files.extend([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
-            except: pass
+                try:
+                    failed_files.extend([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
+                except: pass
+            
+        # Check Success Folder (files here are considered processed/verified if they have reports)
+
+        if os.path.exists(success_dir):
+             try:
+                success_files = [f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)]
+                pass
+             except: pass
             
         return missing_reports, missing_jsons, missing_csv, failed_files
 
@@ -1164,7 +1251,30 @@ class App(ctk.CTk):
 
     def load_layout_config(self):
         if not self.exam_folder: return
-        config_path = os.path.join(self.exam_folder, "layout_config.json")
+        
+        # Ensure grading_data folder exists
+        grading_data_dir = self.get_folder_path('grading_data')
+        if not os.path.exists(grading_data_dir):
+            os.makedirs(grading_data_dir)
+
+        # Check grading_data first
+        config_path = os.path.join(grading_data_dir, "layout_config.json")
+        
+        # Legacy check
+        legacy_path = os.path.join(self.exam_folder, "layout_config.json")
+        
+        if not os.path.exists(config_path) and os.path.exists(legacy_path):
+            self.log(f"⚠️ 发现旧版布局配置: {os.path.basename(legacy_path)}")
+            self.log("🔄 正在迁移至 grading_data 目录...")
+            try:
+                shutil.move(legacy_path, config_path)
+                self.log("✅ 迁移完成。")
+            except Exception as e:
+                self.log(f"❌ 迁移失败: {e}")
+                try:
+                    shutil.copy2(legacy_path, config_path)
+                except: pass
+        
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
@@ -1178,7 +1288,11 @@ class App(ctk.CTk):
 
     def save_layout_config(self):
         if not self.exam_folder or not self.layout_description: return
-        config_path = os.path.join(self.exam_folder, "layout_config.json")
+        
+        grading_data_dir = self.get_folder_path('grading_data')
+        if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+        
+        config_path = os.path.join(grading_data_dir, "layout_config.json")
         try:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump({"layout_description": self.layout_description}, f, ensure_ascii=False, indent=2)
@@ -1195,22 +1309,22 @@ class App(ctk.CTk):
         5. Save and run.
         """
         self.log_separator()
-        self.log("🔍 正在检测答题卡布局配置...")
+        self.log(self.t("log_detecting_layout"))
         
         if self.template_confirmed:
-            self.log("✅ 已找到答题卡布局配置。")
+            self.log(self.t("log_layout_detected"))
             callback()
             return
 
         # Try load
         self.load_layout_config()
         if self.template_confirmed:
-            self.log("✅ 已找到答题卡布局配置。")
+            self.log(self.t("log_layout_detected"))
             callback()
             return
 
         # Need detection
-        self.log("❌ 未检测到答题卡布局配置，开始生成...")
+        self.log(self.t("log_no_layout_generating"))
         self.start_detection_thread(callback)
 
     def on_closing(self):
@@ -1245,12 +1359,19 @@ class App(ctk.CTk):
         # self.log("🔍 正在检测标准答案配置...") # Redundant
         key_loaded = False
         if self.exam_folder:
-            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            grading_data_dir = self.get_folder_path('grading_data')
+            json_path = os.path.join(grading_data_dir, "answer_key.json")
+            
+            # Legacy check
+            legacy_path = os.path.join(self.exam_folder, "answer_key.json")
+            if not os.path.exists(json_path) and os.path.exists(legacy_path):
+                json_path = legacy_path
+                
             if os.path.exists(json_path):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         self.answer_key = json.load(f)
-                    self.log("✅ 已找到标准答案配置。")
+                    self.log(self.t("log_answer_key_found"))
                     key_loaded = True
                 except Exception as e:
                     self.log(f"Failed to load existing answer key: {e}")
@@ -1260,7 +1381,7 @@ class App(ctk.CTk):
             return
     
         # No answer key found, need to extract
-        self.log("❌ 未检测到标准答案配置，开始生成...")
+        self.log(self.t("log_no_answer_key"))
         if not self.rubric_path:
             messagebox.showerror(self.t("title_error"), "Cannot generate answer key: no rubric loaded.")
             return
@@ -1281,12 +1402,12 @@ class App(ctk.CTk):
             
             engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
             
-            self.after(0, lambda: self.log("🚀 请求已发出..."))
+            self.after(0, lambda: self.log(self.t("log_request_sent_rocket")))
             
             # Use Concurrent Extraction & Consolidation (with detailed logging)
             raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
-            self.after(0, lambda: self.log("✅ 请求已收到，正在整合..."))
+            self.after(0, lambda: self.log(self.t("log_req_all_received", count=3)))
             
             final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
@@ -1294,7 +1415,11 @@ class App(ctk.CTk):
             self.after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
             
             # Show Review Dialog
-            json_path = os.path.join(self.exam_folder, "answer_key.json") if self.exam_folder else None
+            json_path = None
+            if self.exam_folder:
+                grading_data_dir = self.get_folder_path('grading_data')
+                if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+                json_path = os.path.join(grading_data_dir, "answer_key.json")
             
             def on_confirm_and_run(confirmed_json):
                 self.answer_key = confirmed_json
@@ -1304,10 +1429,11 @@ class App(ctk.CTk):
                     try:
                         with open(json_path, 'w', encoding='utf-8') as f:
                             json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
-                        self.log("✅ 已确认，已生成 answer_key.json")
+                        self.log(self.t("log_answer_key_confirmed_generated"))
                         
-                        # Trigger CSV generation immediately
-                        self.generate_csv_headers_from_key()
+                        # Trigger CSV generation immediately -> REMOVED
+                        # We wait for ensure_csv_and_run to handle this at the correct time.
+                        # self.generate_csv_headers_from_key()
                         
                     except Exception as e:
                         self.log(f"Failed to save answer key: {e}")
@@ -1315,7 +1441,7 @@ class App(ctk.CTk):
                 # Now run the grading process
                 callback()
             
-            self.after(0, lambda: self.log("⏳ 等待确认..."))
+            self.after(0, lambda: self.log(self.t("log_waiting_confirmation")))
             self.after(0, lambda: self.show_standard_answer_dialog_with_callback(final_key, report, json_path, on_confirm_and_run))
             
         except Exception as e:
@@ -1324,24 +1450,50 @@ class App(ctk.CTk):
 
     def ensure_csv_and_run(self, callback):
         """Ensure CSV exists before running callback"""
+        self.log_separator() # Add separator before CSV check/generation
+        grading_data_dir = self.get_folder_path('grading_data')
         csv_en = "Grade_Summary.csv"
-        csv_cn = "成绩汇总表.csv"
-        path_en = os.path.join(self.exam_folder, csv_en)
-        path_cn = os.path.join(self.exam_folder, csv_cn)
+        csv_cn = "成绩汇总表.csv" # Legacy name support? Or should we enforce Grade_Summary.csv in grading_data?
+
         
-        self.log_separator()
-        self.log("🔍 正在检测成绩汇总表...")
+        path_grading_data = os.path.join(grading_data_dir, "Grade_Summary.csv")
         
-        if os.path.exists(path_en) or os.path.exists(path_cn):
-            self.log("✅ 已找到成绩汇总表。")
+        # Legacy paths
+        path_en_root = os.path.join(self.exam_folder, csv_en)
+        path_cn_root = os.path.join(self.exam_folder, csv_cn)
+        
+        # Check for legacy files and migrate if needed
+        legacy_found = None
+        if os.path.exists(path_en_root): legacy_found = path_en_root
+        elif os.path.exists(path_cn_root): legacy_found = path_cn_root
+        
+        if os.path.exists(path_grading_data):
+            self.log("✅ 已找到成绩汇总表 (grading_data)。")
+
+        elif legacy_found:
+            self.log(f"⚠️ 发现旧版成绩汇总表: {os.path.basename(legacy_found)}")
+            self.log("🔄 正在迁移至 grading_data 目录...")
+            try:
+                shutil.move(legacy_found, path_grading_data)
+                self.log("✅ 迁移完成。")
+            except Exception as e:
+                self.log(f"❌ 迁移失败: {e}")
+
+
+                try:
+                    shutil.copy2(legacy_found, path_grading_data)
+                except: pass
+        
+        # Final check
+        if os.path.exists(path_grading_data):
             callback()
             return
 
         # Not exists, generate headers
-        self.log("❌ 未检测到成绩汇总表，正在生成...")
-        self.log("🚀 请求已发出...") # Simulated for consistency
+        self.log(self.t("log_no_grade_summary"))
+        self.log(self.t("log_request_sent_rocket")) # Simulated for consistency
         self.generate_csv_headers_from_key()
-        self.log("✅ 已生成 Grade_Summary.csv")
+        self.log(self.t("log_grade_summary_generated"))
         callback()
 
     def generate_csv_headers_from_key(self):
@@ -1383,8 +1535,8 @@ class App(ctk.CTk):
                     # It's a main question ID (e.g. "17")
                     main_q_ids.add(qid)
                     # If it has score, it might be a single question
-                    # But usually subjective questions in this system are grouped?
-                    # Let's assume if it's in answer key, it's a question.
+
+
                     pass
 
         # Add Main Totals
@@ -1431,8 +1583,11 @@ class App(ctk.CTk):
             headers += ['原始文件']
             
         # Write CSV
-        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-        csv_path = os.path.join(self.exam_folder, csv_filename)
+        grading_data_dir = self.get_folder_path('grading_data')
+        if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+        
+        csv_filename = "Grade_Summary.csv" # Enforce standard name in grading_data
+        csv_path = os.path.join(grading_data_dir, csv_filename)
         
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fieldnames=headers)
@@ -1494,6 +1649,10 @@ class App(ctk.CTk):
 
     def clear_list(self):
         self.student_list_path = None
+        if hasattr(self, "student_manager"):
+            self.student_manager.student_path = None
+            self.student_manager.students = [] # Clear loaded students too
+            
         self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
         self.save_current_config()
 
@@ -1546,7 +1705,7 @@ class App(ctk.CTk):
                     futures.append(future)
                     
                     # Log Request Sent
-                    self.after(0, lambda i=i: self.log(f"📤 布局分析请求 {i+1} 已发出"))
+                    self.after(0, lambda i=i: self.log(self.t("log_layout_req_sent", index=i+1)))
                     
                     # Stagger by 1 second between starts
                     if i < len(sample_files) - 1:
@@ -1560,24 +1719,24 @@ class App(ctk.CTk):
                         desc = future.result()
                         descriptions.append(desc)
                         # Log Request Received
-                        self.after(0, lambda idx=idx: self.log(f"📥 布局分析请求 {idx} 已收到回复"))
+                        self.after(0, lambda idx=idx: self.log(self.t("log_layout_req_received", index=idx)))
                     except Exception as e:
                         self.log(f"Request {idx} failed: {e}")
             finally:
                 executor.shutdown(wait=True)
             
             # 3. Consolidate
-            self.after(0, lambda: self.log(f"✅ 已收到全部布局分析请求 ({len(descriptions)}/{sample_count})"))
-            self.after(0, lambda: self.log("✅ 请求已收到，正在整合..."))
-            self.after(0, lambda: self.log("📤 整合分析请求已发出"))
+            self.after(0, lambda: self.log(self.t("log_layout_req_all_received", count=len(descriptions))))
+            self.after(0, lambda: self.log(self.t("log_consolidating_layout")))
+            self.after(0, lambda: self.log(self.t("log_consolidation_sent")))
             
             self.after(0, lambda: self.log(self.t("msg_consolidating")))
             final_layout = grader.consolidate_layout(descriptions)
             
-            self.after(0, lambda: self.log("📥 整合分析请求已收到回复"))
+            self.after(0, lambda: self.log(self.t("log_consolidation_received")))
             
             # 4. Show Confirmation (on main thread)
-            self.after(0, lambda: self.log("⏳ 等待确认..."))
+            self.after(0, lambda: self.log(self.t("log_waiting_confirmation")))
             self.after(0, lambda: self.show_confirmation_dialog(final_layout, callback))
             
         except Exception as e:
@@ -1589,7 +1748,7 @@ class App(ctk.CTk):
             self.layout_description = new_desc
             self.template_confirmed = True
             self.save_layout_config()
-            self.log("✅ 已确认，已生成 layout_config.json")
+            self.log(self.t("log_layout_confirmed_generated"))
             self.after(100, callback) # Run callback
             
         TemplateConfirmDialog(self, layout_description, on_confirm)
@@ -1614,24 +1773,39 @@ class App(ctk.CTk):
             self.pause_event.set() # Ensure threads can wake up to exit
             self.log(self.t("msg_stopping"))
 
-    def write_summary_csv(self, data_dict):
+    def write_summary_csv(self, data_dict, target_path=None):
         import csv
         
         is_en = (self.current_lang == "EN")
+        if not self.exam_folder: return
         
-        # Smart Filename Selection: Prioritize existing files
-        csv_en = "Grade_Summary.csv"
-        csv_cn = "成绩汇总表.csv"
-        path_en = os.path.join(self.exam_folder, csv_en)
-        path_cn = os.path.join(self.exam_folder, csv_cn)
-        
-        if os.path.exists(path_en):
-            csv_path = path_en
-        elif os.path.exists(path_cn):
-            csv_path = path_cn
-        else:
-            # Create based on current language
-            csv_path = path_en if is_en else path_cn
+        # Determine CSV path
+        csv_path = target_path
+        if not csv_path:
+            # Check grading_data first
+            grading_data_dir = self.get_folder_path('grading_data')
+            csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            
+            # If not in grading_data, check root (legacy fallback)
+
+            # 1. If target_path is None, try to find existing CSV.
+            # 2. If no existing CSV, default to grading_data.
+            
+            existing_csv = None
+            # Check grading_data
+            p1 = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            if os.path.exists(p1): existing_csv = p1
+            
+            # Check root
+            p2 = os.path.join(self.exam_folder, "Grade_Summary.csv")
+            if not existing_csv and os.path.exists(p2): existing_csv = p2
+            
+            if existing_csv:
+                csv_path = existing_csv
+            else:
+                # Default to grading_data if folder exists, else create it
+                if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+                csv_path = p1
             
         csv_filename = os.path.basename(csv_path)
         
@@ -1762,15 +1936,12 @@ class App(ctk.CTk):
                 except: pass
             
             # If headers mismatch (or new file), rewrite/write header
-            # Note: For simplicity in this grading context, if headers change, we append new columns
-            # But DictWriter handles this by ignoring extras or raising error.
-            # To fix "missing fields" in existing CSV, we should ideally rewrite the file if headers changed.
+
             # Here we implement a check: if sorted_headers != existing_headers, we assume schema change.
             
             mode = 'a'
             if file_exists and existing_headers != sorted_headers:
-                # Schema changed! We need to handle this.
-                # Strategy: Read all data, map to new schema, rewrite.
+
                 try:
                     all_rows = []
                     with open(csv_path, 'r', encoding='utf-8-sig') as f:
@@ -1781,7 +1952,7 @@ class App(ctk.CTk):
                     # We will write all old rows + new row
                 except Exception as e:
                     self.log(f"Error updating CSV schema: {e}")
-                    # Fallback to append (might cause issues but safer than data loss)
+
                     mode = 'a'
             
             try:
@@ -1798,19 +1969,29 @@ class App(ctk.CTk):
                 err = str(e)
                 self.after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
 
-    def regenerate_summary_csv(self):
+    def regenerate_summary_csv(self, target_path=None):
         """Regenerate the entire summary CSV from report JSONs"""
         reports_dir = os.path.join(self.exam_folder, "reports")
         if not os.path.exists(reports_dir): return
         
-        # Delete existing CSVs to start fresh
+        # Determine target path
+        if not target_path:
+            grading_data_dir = self.get_folder_path('grading_data')
+            if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+            target_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            
+        # Delete existing CSVs to start fresh (check both root and grading_data)
         csv_en = "Grade_Summary.csv"
         csv_cn = "成绩汇总表.csv"
-        for fname in [csv_en, csv_cn]:
-            path = os.path.join(self.exam_folder, fname)
-            if os.path.exists(path):
-                try: os.remove(path)
-                except: pass
+        dirs_to_check = [self.exam_folder, self.get_folder_path('grading_data')]
+        
+        for d in dirs_to_check:
+            if os.path.exists(d):
+                for fname in [csv_en, csv_cn]:
+                    path = os.path.join(d, fname)
+                    if os.path.exists(path):
+                        try: os.remove(path)
+                        except: pass
         
         json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
         # Sort by room/seat if possible
@@ -1939,7 +2120,7 @@ class App(ctk.CTk):
                     data_dict[f"Q{qid} Answer"] = ans
                     data_dict[f"Q{qid} Score"] = score
                 
-                self.write_summary_csv(data_dict)
+                self.write_summary_csv(data_dict, target_path=target_path)
                 
             except Exception as e:
                 print(f"Error processing {jf} for CSV: {e}")
@@ -2221,7 +2402,8 @@ class App(ctk.CTk):
         # 1. Check for existing JSON in exam_folder
         json_path = None
         if self.exam_folder:
-            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            grading_data_dir = self.get_folder_path('grading_data')
+            json_path = os.path.join(grading_data_dir, "answer_key.json")
             if os.path.exists(json_path):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
@@ -2267,7 +2449,9 @@ class App(ctk.CTk):
             # Recalculate save_path in case exam_folder was set after extraction
             actual_save_path = save_path
             if not actual_save_path and self.exam_folder:
-                actual_save_path = os.path.join(self.exam_folder, "answer_key.json")
+                grading_data_dir = self.get_folder_path('grading_data')
+                if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+                actual_save_path = os.path.join(grading_data_dir, "answer_key.json")
             
             # Save to JSON
             if actual_save_path:
@@ -2302,7 +2486,8 @@ class App(ctk.CTk):
         
         if not hasattr(self, 'answer_key') or not self.answer_key:
             # Try to load from file
-            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            grading_data_dir = self.get_folder_path('grading_data')
+            json_path = os.path.join(grading_data_dir, "answer_key.json")
             if os.path.exists(json_path):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
@@ -2325,7 +2510,9 @@ class App(ctk.CTk):
             self.answer_key = new_key
             
             # Save updated answer key to JSON
-            json_path = os.path.join(self.exam_folder, "answer_key.json")
+            grading_data_dir = self.get_folder_path('grading_data')
+            if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+            json_path = os.path.join(grading_data_dir, "answer_key.json")
             try:
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
@@ -2344,8 +2531,8 @@ class App(ctk.CTk):
                 return
             
             self.log_separator()
-            self.log(f"🔄 Answer key changes detected for Q: {', '.join(changed_qids)}")
-            self.log(f"🔄 Starting batch re-grading for all students...")
+            self.log(self.t("log_answer_key_changes", qid=', '.join(changed_qids)))
+            self.log(self.t("log_batch_regrading"))
             
             # Start batch re-grading in thread
             threading.Thread(target=self.batch_regrade_objective, args=(changed_qids,), daemon=True).start()
@@ -2358,14 +2545,14 @@ class App(ctk.CTk):
         """
         Batch re-grade all students' objective questions.
         """
-        reports_dir = os.path.join(self.exam_folder, "reports")
+        reports_dir = self.get_folder_path('reports')
         if not os.path.exists(reports_dir):
             self.after(0, lambda: messagebox.showerror(self.t("title_error"), "Reports directory not found."))
             return
         
         json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
         total = len(json_files)
-        self.after(0, lambda: self.log(f"📊 Found {total} student records to process."))
+        self.after(0, lambda: self.log(self.t("log_found_student_records", count=total)))
         
         updated_count = 0
         
@@ -2440,11 +2627,11 @@ class App(ctk.CTk):
         
         # Update CSV
         # Update CSV (Regenerate to ensure consistency)
-        self.after(0, lambda: self.log("🔄 Updating summary CSV..."))
+        self.after(0, lambda: self.log(self.t("log_updating_summary_csv")))
         self.after(0, self.regenerate_summary_csv)
         
         # Done
-        self.after(0, lambda u=updated_count, t=total: self.log(f"✅ Batch re-grading complete. Updated {u}/{t} students."))
+        self.after(0, lambda u=updated_count, t=total: self.log(self.t("log_batch_regrade_complete", updated=u, total=t)))
         self.after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
 
 
@@ -2478,7 +2665,7 @@ class App(ctk.CTk):
         # Generate Content
         md_content, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_student_info)
         
-        reports_dir = os.path.join(self.exam_folder, "reports")
+        reports_dir = self.get_folder_path('reports')
         if not os.path.exists(reports_dir):
             os.makedirs(reports_dir)
             
@@ -2697,7 +2884,7 @@ class App(ctk.CTk):
         If .md exists but .json missing (Legacy), try to generate a minimal .json 
         so ReviewWindow can open.
         """
-        reports_dir = os.path.join(self.exam_folder, "reports")
+        reports_dir = self.get_folder_path('reports')
         if not os.path.exists(reports_dir): return
         
         # We iterate known students/images to reconstruct
@@ -2744,7 +2931,7 @@ class App(ctk.CTk):
 
     def start_targeted_grading(self, target_files):
         # If target_files is None, it means we want to auto-detect missing files (Resume Mode)
-        # But we want to show "Targeted Grading" UI state.
+
         
         count_msg = len(target_files) if target_files else "ALL MISSING"
         self.log(self.t("msg_targeted_start", count=count_msg))
@@ -2799,14 +2986,14 @@ class App(ctk.CTk):
                 err_msg = result['error']
                 self.after(0, lambda fn=filename, e=err_msg: self.log(self.t("log_processing_error", filename=fn, error=e)))
                 if not is_retry:
-                    # Move to failed
-                    failed_dir = os.path.join(self.exam_folder, "failed")
+                    # Move to failed folder
+                    failed_dir = self.get_folder_path('failed')
                     if not os.path.exists(failed_dir): os.makedirs(failed_dir)
                     shutil.move(image_path, os.path.join(failed_dir, filename))
                 return False
             
             
-            # --- Renaming Logic (New) ---
+            # --- Renaming Logic ---
             # Check if filename matches standard patterns: Room-Seat (d-d) ONLY
             import re
             is_standard = re.match(r"^\d+-\d+$", os.path.splitext(filename)[0])
@@ -2837,13 +3024,13 @@ class App(ctk.CTk):
                         
                         try:
                             os.rename(image_path, dest_path)
-                            self.after(0, lambda o=filename, n=new_filename: self.log(f"🔄 Renamed: {o} -> {n}"))
+                            self.after(0, lambda o=filename, n=new_filename: self.log(self.t("log_renamed_file", old=o, new=n)))
                             
                             # Update variables
                             filename = new_filename
                             image_path = dest_path
                         except Exception as e:
-                            self.after(0, lambda e=str(e): self.log(f"⚠️ Rename failed: {e}"))
+                            self.after(0, lambda e=str(e): self.log(self.t("log_processing_error", filename=filename, error=f"Rename failed: {e}")))
 
             # Resolve Student Info (Re-resolve with potentially new filename)
             student_info, _ = self.student_manager.get_student_by_filename(filename)
@@ -2862,14 +3049,21 @@ class App(ctk.CTk):
                 self.completed_count += 1
                 self.session_completed_count += 1
             
-            # If this was a retry, move the file from failed back to main folder
+            # If this was a retry, move the file from failed back to success folder (or main if we want to keep it there, but user wants success folder)
+
+            success_dir = self.get_folder_path('success')
+            if not os.path.exists(success_dir): os.makedirs(success_dir)
+            
+            try:
+                final_dest = os.path.join(success_dir, filename)
+                shutil.move(image_path, final_dest)
+                # self.log(f"Moved to success: {filename}")
+            except Exception as e:
+                self.log(f"⚠️ Failed to move to success: {e}")
+
             if is_retry:
-                try:
-                    dest_main = os.path.join(self.exam_folder, filename)
-                    shutil.move(image_path, dest_main)
-                    self.after(0, lambda fn=filename: self.log(self.t("log_moved_back", filename=fn)))
-                except Exception as e:
-                    self.after(0, lambda fn=filename: self.log(self.t("log_move_failed", filename=fn, error=str(e))))
+
+                self.after(0, lambda fn=filename: self.log(self.t("log_moved_back", filename=fn))) # Message might need update "Processed successfully"
             
             # Update UI and log (outside lock)
             self.after(0, lambda: self.update_progress_ui())
@@ -2880,7 +3074,7 @@ class App(ctk.CTk):
             err_str = str(e)
             self.after(0, lambda fn=filename, e=err_str: self.log(self.t("log_processing_error", filename=fn, error=e)))
             if not is_retry:
-                failed_dir = os.path.join(self.exam_folder, "failed")
+                failed_dir = self.get_folder_path('failed')
                 if not os.path.exists(failed_dir): os.makedirs(failed_dir)
                 try: shutil.move(image_path, os.path.join(failed_dir, filename))
                 except: pass
@@ -2893,7 +3087,7 @@ class App(ctk.CTk):
             # Use current_api_key if available (handles masking), else fallback to entry
             api_key = getattr(self, "current_api_key", self.entry_key.get())
             # Double check: if api_key is masked (starts with sk- and has ...), try to get from entry if entry is not masked?
-            # Actually, current_api_key should always be the real key if logic is correct.
+
             # If entry has real key (user typed it but didn't trigger focus out?), use entry.
             entry_val = self.entry_key.get()
             if not api_key.startswith("sk-") or "..." not in api_key:
@@ -2907,13 +3101,44 @@ class App(ctk.CTk):
             valid_extensions = ('.png', '.jpg', '.jpeg')
             
             # ===== PHASE 1: Main Folder Processing =====
+
             files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
             
+            # Also scan success folder for completed files
+            success_dir = self.get_folder_path('success')
+            success_files = []
+            if os.path.exists(success_dir):
+                success_files = [f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)]
+            
+            # Total files known = root files + success files
+            all_known_files = set(files + success_files)
+            
+            # Backup Logic: Copy all valid images to original_files
+            original_files_dir = self.get_folder_path('original_files')
+            if not os.path.exists(original_files_dir):
+                os.makedirs(original_files_dir)
+                
+            # Backup root files
+            for f in files:
+                src = os.path.join(self.exam_folder, f)
+                dst = os.path.join(original_files_dir, f)
+                if not os.path.exists(dst): 
+                    try: shutil.copy2(src, dst)
+                    except: pass
+            
+            # Backup success files (if not already backed up)
+            for f in success_files:
+                src = os.path.join(success_dir, f)
+                dst = os.path.join(original_files_dir, f)
+                if not os.path.exists(dst):
+                    try: shutil.copy2(src, dst)
+                    except: pass
+
             pending_files = []
             
             if target_files:
                 # Targeted Mode: Only process specific files
-                failed_dir = os.path.join(self.exam_folder, "failed")
+                failed_dir = self.get_folder_path('failed')
                 
                 for fname in target_files:
                     src_failed = os.path.join(failed_dir, fname)
@@ -2932,7 +3157,7 @@ class App(ctk.CTk):
                 
             else:
                 # Normal Mode: Use comprehensive verification to find pending files
-                self.log("🔍 正在检查已完成的文件...")
+                self.log(self.t("log_checking_completed"))
                 
                 # Run full verification
                 missing_reports, missing_jsons, missing_csv, failed_files = self._verify_files_sync()
@@ -2944,18 +3169,37 @@ class App(ctk.CTk):
                 files_needing_work.update(missing_csv)
                 
                 # Add all files from the main folder that need processing
+
                 for f in files:
                     if f in files_needing_work:
                         pending_files.append(f)
                 
-                completed_count = len(files) - len(pending_files)
+                # Also check success files - if they are missing reports, move them back to root to re-process?
+
+                # process_single_file expects 'filename' and looks in self.exam_folder.
+                # If we add success files to pending_files, process_single_file will fail if file is not in root.
+
+                
+                for f in success_files:
+                    if f in files_needing_work:
+                        # Move back to root
+                        src = os.path.join(success_dir, f)
+                        dst = os.path.join(self.exam_folder, f)
+                        try:
+                            shutil.move(src, dst)
+                            pending_files.append(f)
+                            self.log(f"🔄 Found incomplete file in success folder, moving back to process: {f}")
+                        except Exception as e:
+                            self.log(f"⚠️ Failed to move incomplete file back: {e}")
+
+                completed_count = len(all_known_files) - len(pending_files)
                 if completed_count > 0:
                     self.log(f"✅ 已完成 {completed_count} 个文件，跳过。")
                 if pending_files:
-                    self.log(f"📝 需要处理 {len(pending_files)} 个文件。")
+                    self.log(self.t("log_files_to_process", count=len(pending_files)))
             
             # Check failed folder count
-            failed_dir = os.path.join(self.exam_folder, "failed")
+            failed_dir = self.get_folder_path('failed')
             failed_count = 0
             if os.path.exists(failed_dir):
                 failed_count = len([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
@@ -3033,21 +3277,30 @@ class App(ctk.CTk):
                 # Wait a bit for any pending writes to complete
                 time.sleep(2)
                 
-                self.after(0, lambda: self.log("🔄 Regenerating Summary CSV..."))
+                self.after(0, lambda: self.log(self.t("log_regen_csv")))
                 self.regenerate_csv_from_jsons()
                 
                 # Final count verification
-                self.after(0, lambda: self.log("📊 Verifying final counts..."))
-                total_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+
+                self.after(0, lambda: self.log(self.t("log_verify_counts")))
                 
-                reports_dir = os.path.join(self.exam_folder, "reports")
+                # Count images in root + success
+                root_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+                success_dir = self.get_folder_path('success')
+                success_images = 0
+                if os.path.exists(success_dir):
+                    success_images = len([f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)])
+                total_images = root_images + success_images
+                
+                reports_dir = self.get_folder_path('reports')
                 if os.path.exists(reports_dir):
                     json_count = len([f for f in os.listdir(reports_dir) if f.endswith('.json')])
                     md_count = len([f for f in os.listdir(reports_dir) if f.endswith('.md')])
                 else:
                     json_count = md_count = 0
                 
-                csv_path = os.path.join(self.exam_folder, "成绩汇总表.csv")
+                grading_data_dir = self.get_folder_path('grading_data')
+                csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
                 csv_rows = 0
                 if os.path.exists(csv_path):
                     try:
@@ -3107,8 +3360,7 @@ class App(ctk.CTk):
         with open(save_path, "w", encoding="utf-8") as f:
             f.write(md_content)
             
-        # 2. Update CSV (Re-generate whole CSV to be safe and simple)
-        # This might be slow for huge batches, but ensures consistency.
+        # 2. Update CSV
         self.regenerate_csv_from_jsons()
 
     def regenerate_csv_from_jsons(self):
@@ -3134,11 +3386,6 @@ class App(ctk.CTk):
         # Load Answer Key for sorting
         answer_key_order = []
         if hasattr(self, 'answer_key') and self.answer_key:
-             # Extract QIDs in order
-             # Assuming answer_key is a list of dicts or dict of dicts. 
-             # Based on previous code, it seems to be a dict where keys are QIDs? 
-             # Wait, extract_answer_key_for_grading produces a dict.
-             # Let's try to sort keys numerically/alphanumerically
              pass
 
         for jf in json_files:
@@ -3220,17 +3467,14 @@ class App(ctk.CTk):
                     for k, v in summary.items():
                         new_key = header_map.get(k, k)
                         # Translate Q-keys if needed? "Q1 Answer" -> "Q1 Answer" (Already EN)
-                        # But if we want "Q1 答案" in CN, we need to handle that.
-                        # The current code generates "Q{qid} Answer" which is mixed.
-                        # Let's standardize: 
+
+ 
                         # CN: "Q1 答案", "Q1 得分", "Q17 总分", "Q17(1) 得分"
                         # EN: "Q1 Answer", "Q1 Score", "Q17 Total", "Q17(1) Score"
                         
-                        # For now, let's stick to what save_markdown produces or standardize here.
-                        # save_markdown produces "Q{qid} Answer" and "Q{qid} Score" (English keys).
-                        # Let's translate them if we are in CN mode? 
-                        # Actually, save_markdown (lines 2292) uses "Q{qid} Answer".
-                        # To support bilingual headers for dynamic keys, we need to detect them.
+
+ 
+
                         
                         if k.endswith(" Answer"):
                              new_key = k # Already EN
@@ -3253,13 +3497,12 @@ class App(ctk.CTk):
                             new_key = k.replace(" Total", " 总分")
                         elif re.match(r"Q\d+\(\d+\)$", k): # Q17(1) -> Q17(1) 得分 (if it's just the key)
                              # sub_scores_dict keys are just "17(1)" or "17"
-                             # But summary.update adds them as is.
-                             # We probably want to prefix them?
-                             # Wait, sub_scores_dict keys are "17(1)", "17".
-                             # We should probably rename them in the summary to "Q17(1) Score" etc.
+
+
+
                              pass
                         
-                        # Actually, let's fix the keys in the loop above before translation
+
                         pass
                     
                     # Re-do the loop to be cleaner
@@ -3340,13 +3583,8 @@ class App(ctk.CTk):
         
         # 5. Objective Questions (Sorted by QID)
         obj_keys = [k for k in all_keys if "Answer" in k or "答案" in k or ("Score" in k or "得分" in k)]
-        # Exclude subjective ones if they got in (Subjective usually don't have "Answer" key in this logic)
-        # But "Score"/"得分" is common.
-        # Subjective keys: "Q17(1) 得分", "Q17 总分"
-        # Objective keys: "Q1 答案", "Q1 得分"
-        # We need to distinguish.
-        # Objective keys usually don't have ( ) and are small numbers? 
-        # Better: Filter by those NOT in subj_keys
+        # Filter out keys that are already included in subjective keys or headers to avoid duplicates.
+        # This ensures we distinguish between objective questions (e.g., "Q1 答案") and subjective ones (e.g., "Q17(1) 得分").
         obj_keys = [k for k in obj_keys if k not in subj_keys and k not in headers]
         
         def obj_sort(k):
@@ -3370,8 +3608,12 @@ class App(ctk.CTk):
             headers += ['原始文件', '重命名文件']
             
         # Write CSV
-        csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-        csv_path = os.path.join(self.exam_folder, csv_filename)
+
+        grading_data_dir = self.get_folder_path('grading_data')
+        if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
+        
+        csv_filename = "Grade_Summary.csv"
+        csv_path = os.path.join(grading_data_dir, csv_filename)
         
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fieldnames=headers, extrasaction='ignore')

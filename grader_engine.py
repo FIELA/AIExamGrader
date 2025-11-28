@@ -379,7 +379,10 @@ class AIGraderEngine:
             parsed = json.loads(clean_json_string(result_text))
             
             if log_callback:
-                log_callback("📥 整合分析请求已收到回复 / Consolidation analysis response received")
+                if t_func:
+                    log_callback(t_func("log_consolidation_received"))
+                else:
+                    log_callback("📥 整合分析请求已收到回复 / Consolidation analysis response received")
             
             return parsed.get('final_key', {}), parsed.get('report', 'No report generated.')
             
