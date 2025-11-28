@@ -35,7 +35,7 @@ def create_icon():
     draw.line(check_points, fill=bg_color, width=45, joint='curve')
     
     # AI Sparkle (Top right of the white square)
-    # Let's move it slightly outside or on the corner
+
     cx, cy = center_x + half_size, center_y - half_size
     r_out = 35
     r_in = 12
@@ -58,7 +58,7 @@ def create_icon():
 def create_refresh_icon():
     size = (64, 64) # Standard icon size
     # Icon color: White (since buttons have colored background)
-    # But wait, the button has a purple background (#7C3AED). White icon is good.
+
     icon_color = (255, 255, 255, 255)
     
     img = Image.new('RGBA', size, (0, 0, 0, 0))

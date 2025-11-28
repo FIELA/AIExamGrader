@@ -63,7 +63,7 @@ class ReviewWindow(ctk.CTkToplevel):
         self.exam_folder = exam_folder
         self.student_manager = student_manager
         self.on_save_callback = on_save_callback
-        self.reports_dir = os.path.join(exam_folder, "reports")
+        self.reports_dir = self.parent_app.get_folder_path('reports')
         
         self.image_files = []
         self.current_index = 0
@@ -93,9 +93,9 @@ class ReviewWindow(ctk.CTkToplevel):
         self.load_file_list()
         self.setup_ui()
         
-        # Check for saved progress
-        # Check for saved progress
-        self.progress_file = os.path.join(self.exam_folder, "review_progress.json")
+        # Check for saved progress - save in grading_data folder
+        grading_data_dir = self.parent_app.get_folder_path('grading_data')
+        self.progress_file = os.path.join(grading_data_dir, "review_progress.json")
         
         # Default start index: First unreviewed student
         start_index = 0
@@ -154,13 +154,27 @@ class ReviewWindow(ctk.CTkToplevel):
     def load_file_list(self):
         valid_extensions = ('.png', '.jpg', '.jpeg')
         if os.path.exists(self.exam_folder):
-            all_files = sorted([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
+            # Scan both root (for backward compatibility or pending) and success folder
+            # Store ABSOLUTE paths to avoid ambiguity
+            root_files = [os.path.join(self.exam_folder, f) for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
+            
+            success_dir = self.parent_app.get_folder_path('success')
+            success_files = []
+            if os.path.exists(success_dir):
+                success_files = [os.path.join(success_dir, f) for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)]
+            
+            # Combine lists (absolute paths)
+            all_files = sorted(root_files + success_files)
+            
             self.image_files = []
             
             # Filter: Only include files with generated reports (JSON)
             for f in all_files:
                 try:
-                    student_info, _ = self.student_manager.get_student_by_filename(f)
+                    # Handle relative path for filename check
+                    filename_only = os.path.basename(f)
+                    
+                    student_info, _ = self.student_manager.get_student_by_filename(filename_only)
                     room = str(student_info.get('room', '未知'))
                     seat = str(student_info.get('seat', '未知'))
                     
@@ -171,19 +185,14 @@ class ReviewWindow(ctk.CTkToplevel):
                     
                     # If not found and room/seat is unknown (or empty), try filename-based JSON
                     if not file_has_json and (room == '未知' or seat == '未知' or not room or not seat):
-                        base_name = os.path.splitext(f)[0]
+                        base_name = os.path.splitext(filename_only)[0]
                         fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
                         file_has_json = os.path.exists(fallback_json_path)
-                        # self.parent_app.log(f"DEBUG: Checking fallback JSON for {f}: {fallback_json_path} -> {file_has_json}")
                     
                     if file_has_json:
                         self.image_files.append(f)
-                    else:
-                        self.parent_app.log(f"DEBUG: Skipping {f}, no JSON found. (Room: {room}, Seat: {seat})")
                 except Exception as e:
-                    self.parent_app.log(f"DEBUG: Error checking {f}: {e}")
-            
-            self.parent_app.log(f"DEBUG: load_file_list found {len(self.image_files)} valid files.")
+                    pass
 
     def setup_ui(self):
         # Clear existing widgets
@@ -274,8 +283,9 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_zoom_out = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_zoom_out"), width=40, command=self.zoom_out)
         self.btn_zoom_out.pack(side="left", padx=5, pady=5)
         
-        self.lbl_zoom = ctk.CTkLabel(self.zoom_toolbar, text=self.t("lbl_zoom", scale=100), width=60)
-        self.lbl_zoom.pack(side="left", padx=5)
+        # Zoom Label (white text for visibility)
+        self.lbl_zoom = ctk.CTkLabel(self.zoom_toolbar, text="100%", width=50, font=("Arial", 14, "bold"), text_color="white")
+        self.lbl_zoom.pack(side="left", padx=5, pady=5)
         
         self.btn_zoom_in = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_zoom_in"), width=40, command=self.zoom_in)
         self.btn_zoom_in.pack(side="left", padx=5, pady=5)
@@ -283,11 +293,19 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_reset = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_reset_zoom"), width=80, command=self.reset_zoom)
         self.btn_reset.pack(side="left", padx=10, pady=5)
         
-        self.btn_left = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_left"), width=80, command=self.scroll_to_left)
-        self.btn_left.pack(side="left", padx=5, pady=5)
+        # Vertical scroll buttons (left side after reset)
+        self.btn_up = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_move_up"), width=80, command=self.scroll_up_quarter)
+        self.btn_up.pack(side="left", padx=5, pady=5)
         
+        self.btn_down = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_move_down"), width=80, command=self.scroll_down_quarter)
+        self.btn_down.pack(side="left", padx=5, pady=5)
+        
+        # Horizontal scroll buttons (right side)
         self.btn_right = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_right"), width=80, command=self.scroll_to_right)
-        self.btn_right.pack(side="left", padx=5, pady=5)
+        self.btn_right.pack(side="right", padx=5, pady=5)
+        
+        self.btn_left = ctk.CTkButton(self.zoom_toolbar, text=self.t("btn_left"), width=80, command=self.scroll_to_left)
+        self.btn_left.pack(side="right", padx=5, pady=5)
         
         # Bindings
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
@@ -390,19 +408,23 @@ class ReviewWindow(ctk.CTkToplevel):
         self.subj_scroll = ctk.CTkScrollableFrame(self.right_panel, label_text=self.t("lbl_review_details"))
         self.subj_scroll.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=5)
         
-        # Scroll Buttons Frame
+        # Scroll Buttons Frame - stretch full height
         self.scroll_btn_frame = ctk.CTkFrame(self.right_panel, width=50, fg_color="transparent")
         self.scroll_btn_frame.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
         
-        # Center buttons vertically
-        self.scroll_btn_frame.grid_rowconfigure(0, weight=1)
-        self.scroll_btn_frame.grid_rowconfigure(3, weight=1)
+        # Add weight to push up button to ~60% position, down button to bottom
+        self.scroll_btn_frame.grid_rowconfigure(0, weight=6)  # 60% top spacing
+        self.scroll_btn_frame.grid_rowconfigure(1, weight=0)  # Up button
+        self.scroll_btn_frame.grid_rowconfigure(2, weight=4)  # Rest of the space
+        self.scroll_btn_frame.grid_rowconfigure(3, weight=0)  # Down button at bottom
         
-        self.btn_move_up = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_up"), width=40, command=self.scroll_text_top)
+        # Up button at ~60% position
+        self.btn_move_up = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_up"), width=70, height=60, command=self.scroll_text_top)
         self.btn_move_up.grid(row=1, column=0, pady=10)
         
-        self.btn_move_down = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_down"), width=40, command=self.scroll_text_bottom)
-        self.btn_move_down.grid(row=2, column=0, pady=10)
+        # Down button at very bottom (no bottom padding)
+        self.btn_move_down = ctk.CTkButton(self.scroll_btn_frame, text=self.t("btn_move_down"), width=70, height=60, command=self.scroll_text_bottom)
+        self.btn_move_down.grid(row=3, column=0, pady=(0, 0))
         
         # Enable global mouse wheel scrolling
         self.setup_global_scroll()
@@ -483,12 +505,12 @@ class ReviewWindow(ctk.CTkToplevel):
                 found_index = idx
                 break
                 
-            # Check just seat if room is implicit? No, stick to explicit.
+
             
         if found_index != -1:
             self.current_index = found_index
             self.load_current_student()
-            # Clear search? Maybe keep it.
+
         else:
             messagebox.showinfo(self.t("title_success"), self.t("msg_student_not_found"))
 
@@ -504,7 +526,49 @@ class ReviewWindow(ctk.CTkToplevel):
             self.redraw_image()
             
     def reset_zoom(self):
-        self.scale = 0.27
+        """Smart auto-zoom based on image aspect ratio"""
+        if not self.current_image:
+            self.scale = 0.27
+            return
+        
+        # Get canvas and image dimensions
+        self.canvas.update_idletasks()
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        # Fallback if canvas not ready
+        if canvas_width <= 1 or canvas_height <= 1:
+            self.scale = 0.27
+            self.pan_x = 0
+            self.pan_y = 0
+            self.redraw_image()
+            return
+        
+        img_width, img_height = self.current_image.size
+        
+        # Determine if image is horizontal (left-right stitched) or vertical (top-bottom stitched)
+        is_horizontal = img_width > img_height
+        
+        if is_horizontal:
+            # Horizontal image (wide): fit to canvas HEIGHT
+
+            usable_height = canvas_height * 0.99
+            scale_to_fit = usable_height / img_height
+        else:
+            # Vertical image (tall): fit to canvas WIDTH
+
+            usable_width = canvas_width * 0.90
+            scale_to_fit = usable_width / img_width
+        
+        # Use the calculated scale directly
+        self.scale = scale_to_fit
+        
+        # Ensure scale is reasonable
+        if self.scale < 0.1:
+            self.scale = 0.1
+        elif self.scale > 2.0:
+            self.scale = 1.0
+        
         self.pan_x = 0
         self.pan_y = 0
         self.redraw_image()
@@ -516,6 +580,18 @@ class ReviewWindow(ctk.CTkToplevel):
 
     def scroll_to_left(self):
         self.canvas.xview_moveto(0.0)
+    
+    def scroll_up_quarter(self):
+        """Scroll up by 1/4 of the canvas height"""
+        current_pos = self.canvas.yview()[0]
+        new_pos = max(0.0, current_pos - 0.25)
+        self.canvas.yview_moveto(new_pos)
+    
+    def scroll_down_quarter(self):
+        """Scroll down by 1/4 of the canvas height"""
+        current_pos = self.canvas.yview()[0]
+        new_pos = min(1.0, current_pos + 0.25)
+        self.canvas.yview_moveto(new_pos)
 
     def redraw_image(self):
         if not self.current_image: return
@@ -566,18 +642,33 @@ class ReviewWindow(ctk.CTkToplevel):
             
         # 1. Load Image (Only if in image mode)
         if self.view_mode == 'image':
-            img_path = os.path.join(self.exam_folder, filename)
-            self.parent_app.log(f"DEBUG: Loading image: {img_path}")
+            # filename is now an ABSOLUTE path
+            img_path = filename
+            
+            # Fallback for legacy relative paths (just in case)
+            if not os.path.isabs(img_path):
+                img_path = os.path.join(self.exam_folder, filename)
+            
             if os.path.exists(img_path):
-                self.parent_app.log("DEBUG: Image file exists.")
-                self.current_image = Image.open(img_path)
-                self.reset_zoom()
+                try:
+                    self.current_image = Image.open(img_path)
+                    
+                    # Force canvas to update its layout
+                    self.canvas.update_idletasks()
+                    self.update_idletasks()
+                    
+                    # Call reset_zoom directly
+                    self.reset_zoom()
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    self.show_placeholder(f"Error loading image: {e}")
             else:
-                self.parent_app.log("DEBUG: Image file NOT found.")
                 self.show_placeholder(self.t("msg_no_images"))
             
         # 2. Resolve Student & Report
-        student_info, _ = self.student_manager.get_student_by_filename(filename)
+        filename_only = os.path.basename(filename)
+        student_info, _ = self.student_manager.get_student_by_filename(filename_only)
         room = str(student_info.get('room', '未知'))
         seat = str(student_info.get('seat', '未知'))
         
@@ -591,7 +682,7 @@ class ReviewWindow(ctk.CTkToplevel):
                 json_loaded = True
         elif room == '未知' or seat == '未知' or not room or not seat:
             # Fallback: Try loading by filename
-            base_name = os.path.splitext(filename)[0]
+            base_name = os.path.splitext(filename_only)[0]
             fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
             if os.path.exists(fallback_json_path):
                 with open(fallback_json_path, "r", encoding="utf-8") as f:
@@ -604,13 +695,18 @@ class ReviewWindow(ctk.CTkToplevel):
             csv_obj_score = 0
             
             # Try both Chinese and English filenames
-            csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
-            csv_path = None
-            for name in csv_names:
-                p = os.path.join(self.exam_folder, name)
-                if os.path.exists(p):
-                    csv_path = p
-                    break
+            # Prioritize grading_data
+            grading_data_dir = self.parent_app.get_folder_path('grading_data')
+            csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            
+            if not os.path.exists(csv_path):
+                # Fallback to root (Legacy)
+                csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
+                for name in csv_names:
+                    p = os.path.join(self.exam_folder, name)
+                    if os.path.exists(p):
+                        csv_path = p
+                        break
             
             if csv_path:
                 try:
@@ -677,7 +773,7 @@ class ReviewWindow(ctk.CTkToplevel):
                 md_content = f.read()
         elif room == '未知' or seat == '未知' or not room or not seat:
              # Fallback: Try loading by filename
-            base_name = os.path.splitext(filename)[0]
+            base_name = os.path.splitext(filename_only)[0]
             fallback_md_path = os.path.join(self.reports_dir, f"{base_name}.md")
             if os.path.exists(fallback_md_path):
                 with open(fallback_md_path, "r", encoding="utf-8") as f:
@@ -762,6 +858,52 @@ class ReviewWindow(ctk.CTkToplevel):
             self.btn_confirm_all.configure(state=target_state)
             
     def on_absence_toggle(self):
+        """Handle absence checkbox toggle - immediately save or restore scores"""
+        is_absence = self.chk_absence_var.get()
+        
+        if is_absence:
+            # Checking absence - save original scores before zeroing
+            if 'original_scores' not in self.current_data:
+                # Save current scores as original
+                self.current_data['original_scores'] = {
+                    'total_score': self.current_data.get('total_score', 0),
+                    'legacy_obj_score': self.current_data.get('legacy_obj_score', 0),
+                    'details': [dict(item) for item in self.current_data.get('details', [])]  # Deep copy
+                }
+            
+            # Zero out displayed scores
+            self.current_data['total_score'] = 0
+            self.current_data['legacy_obj_score'] = 0
+            for item in self.current_data.get('details', []):
+                item['score'] = 0
+            self.current_data['absence_confirmed'] = True
+        else:
+            # Unchecking absence - restore original scores if they exist
+            if 'original_scores' in self.current_data:
+                # Restore from saved original scores
+                self.current_data['total_score'] = self.current_data['original_scores'].get('total_score', 0)
+                self.current_data['legacy_obj_score'] = self.current_data['original_scores'].get('legacy_obj_score', 0)
+                
+                # Restore details scores
+                original_details = self.current_data['original_scores'].get('details', [])
+                current_details = self.current_data.get('details', [])
+                
+                # Match by question_id and restore scores
+                for orig_item in original_details:
+                    q_id = orig_item.get('question_id')
+                    for curr_item in current_details:
+                        if curr_item.get('question_id') == q_id:
+                            curr_item['score'] = orig_item.get('score', 0)
+                            break
+                
+                # Remove original_scores after restoration
+                del self.current_data['original_scores']
+            
+            self.current_data['absence_confirmed'] = False
+        
+        # Refresh UI to show updated scores
+        self.refresh_current_display()
+        
         # Update button state immediately if timer is not running
         if self.confirm_timer_seconds <= 0:
             self.update_confirm_button_state()
@@ -772,6 +914,40 @@ class ReviewWindow(ctk.CTkToplevel):
         if hasattr(self, 'lbl_score'):
             score = self.current_data.get('total_score', 0)
             self.lbl_score.configure(text=self.t("lbl_total_score_display", score=score))
+    
+    def refresh_current_display(self):
+        """Refresh all displayed scores and fields after absence toggle"""
+        # Update total score display
+        self.update_score_display()
+        
+        # Update objective score field if it exists
+        if hasattr(self, 'entry_obj_score'):
+            try:
+                obj_score = self.current_data.get('legacy_obj_score', 0)
+                # Calculate from details if available
+                details = self.current_data.get('details', [])
+                if details:
+                    obj_sum = sum(x.get('score', 0) for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', ''))
+                    if obj_sum > 0:
+                        obj_score = obj_sum
+                self.entry_obj_score.delete(0, 'end')
+                self.entry_obj_score.insert(0, str(obj_score))
+            except:
+                pass
+        
+        # Update subjective score fields
+        if hasattr(self, 'sub_entries'):
+            for q_id, (entry, max_s) in self.sub_entries.items():
+                try:
+                    score = 0
+                    for item in self.current_data.get('details', []):
+                        if item.get('question_id') == q_id:
+                            score = item.get('score', 0)
+                            break
+                    entry.delete(0, 'end')
+                    entry.insert(0, str(score))
+                except:
+                    pass
 
 
 
@@ -1118,42 +1294,67 @@ class ReviewWindow(ctk.CTkToplevel):
                         item['score'] = val
             except: return
 
-        # 4. Recalculate Total
+
         # 4. Recalculate Total
         if self.chk_absence_var.get():
+            # Confirming absence - save original scores before zeroing
+            if 'original_scores' not in self.current_data:
+                # Save current scores as original
+                self.current_data['original_scores'] = {
+                    'total_score': self.current_data.get('total_score', 0),
+                    'legacy_obj_score': self.current_data.get('legacy_obj_score', 0),
+                    'details': [dict(item) for item in self.current_data.get('details', [])]  # Deep copy
+                }
+            
+            # Zero out all scores
             self.current_data['total_score'] = 0
             self.current_data['legacy_obj_score'] = 0
             for item in self.current_data.get('details', []):
                 item['score'] = 0
+            self.current_data['absence_confirmed'] = True
         else:
-            details = self.current_data.get('details', [])
-            sub_sum = sum(x.get('score', 0) for x in details)
-            legacy_obj = self.current_data.get('legacy_obj_score', 0)
-            
-            if not details:
-                 self.current_data['total_score'] = legacy_obj
+            # Not absent or unchecking absence - restore original scores if they exist
+            if 'original_scores' in self.current_data:
+                # Restore from saved original scores
+                self.current_data['total_score'] = self.current_data['original_scores'].get('total_score', 0)
+                self.current_data['legacy_obj_score'] = self.current_data['original_scores'].get('legacy_obj_score', 0)
+                
+                # Restore details scores
+                original_details = self.current_data['original_scores'].get('details', [])
+                current_details = self.current_data.get('details', [])
+                
+                # Match by question_id and restore scores
+                for orig_item in original_details:
+                    q_id = orig_item.get('question_id')
+                    for curr_item in current_details:
+                        if curr_item.get('question_id') == q_id:
+                            curr_item['score'] = orig_item.get('score', 0)
+                            break
+                
+                # Remove original_scores after restoration
+                del self.current_data['original_scores']
             else:
-                 has_obj = any("客观" in x.get('type', '') for x in details)
-                 if has_obj:
-                     self.current_data['total_score'] = sub_sum
-                 else:
-                     self.current_data['total_score'] = sub_sum + legacy_obj
+                # Normal calculation (not from absence restoration)
+                details = self.current_data.get('details', [])
+                sub_sum = sum(x.get('score', 0) for x in details)
+                legacy_obj = self.current_data.get('legacy_obj_score', 0)
+                
+                if not details:
+                     self.current_data['total_score'] = legacy_obj
+                else:
+                     has_obj = any("客观" in x.get('type', '') for x in details)
+                     if has_obj:
+                         self.current_data['total_score'] = sub_sum
+                     else:
+                         self.current_data['total_score'] = sub_sum + legacy_obj
+            
+            self.current_data['absence_confirmed'] = False
         
         self.save_to_disk()
         self.next_student()
 
+
     def save_current_step(self):
-        # Implementation for save_current_step (needed for next_step/prev_step)
-        # Note: This was also missing in the previous view, but confirm_all_and_next covers most logic.
-        # However, next_step calls save_current_step.
-        # I need to make sure save_current_step is defined or I refactor next_step.
-        # Looking at previous code, save_current_step was defined.
-        # Let's re-add it if it's missing, but wait, I see confirm_all_and_next.
-        # The previous replace removed save_current_step too?
-        # Let's check the view again.
-        # Ah, I see confirm_all_and_next but I don't see save_current_step in the view output (450-537).
-        # I need to restore save_current_step as well if it's used by next_step.
-        # Yes, next_step calls self.save_current_step().
         
         step = self.steps[self.current_step_index]
         
@@ -1257,14 +1458,6 @@ class ReviewWindow(ctk.CTkToplevel):
             self.scale /= 1.2
             self.redraw_image()
             
-    def reset_zoom(self):
-        self.scale = 0.27
-        self.pan_x = 0
-        self.pan_y = 0
-        self.redraw_image()
-        self.canvas.xview_moveto(0)
-        self.canvas.yview_moveto(0)
-        
     def scroll_to_right(self):
         self.canvas.xview_moveto(1.0)
 
@@ -1465,11 +1658,26 @@ class ReviewWindow(ctk.CTkToplevel):
         try:
             # Determine CSV filename based on language
             is_en = (self.parent_app.current_lang == "EN") if hasattr(self.parent_app, 'current_lang') else False
-            csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-            csv_path = os.path.join(os.path.dirname(self.reports_dir), csv_filename)
+            
+            # Prioritize grading_data
+            # Prioritize grading_data
+            grading_data_dir = self.parent_app.get_folder_path('grading_data')
+            csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            
+            # Legacy fallback check (if grading_data CSV doesn't exist but root one does)
+
+            # If grading_data CSV exists, use it.
+            # If not, check root.
             
             if not os.path.exists(csv_path):
-                # If CSV doesn't exist, use callback to generate it
+                 # Check root legacy
+                 legacy_name = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
+                 legacy_path = os.path.join(self.exam_folder, legacy_name)
+                 if os.path.exists(legacy_path):
+                     csv_path = legacy_path
+            
+            if not os.path.exists(csv_path):
+                # If CSV doesn't exist at all, use callback to generate it
                 if self.on_save_callback:
                     self.on_save_callback(self.current_data)
                 return
@@ -1777,16 +1985,28 @@ class ReviewWindow(ctk.CTkToplevel):
         if self.is_descendant(widget, self.subj_scroll):
             try:
                 canvas = self.subj_scroll._parent_canvas
+                # macOS uses event.delta directly (positive = scroll up, negative = scroll down)
                 if platform.system() == "Darwin":
-                    canvas.yview_scroll(int(-1 * (event.delta)), "units")
+                    # Touchpad gives large delta values, mouse wheel gives ±120
+                    # Normalize and invert: positive delta = scroll up = move content down
+                    delta = event.delta
+                    if abs(delta) > 120:
+                        # Touchpad - use proportional scrolling
+                        units = int(-1 * delta / 10)  # Divide by 10 for smoother scrolling
+                    else:
+                        # Mouse wheel - use fixed units
+                        units = int(-1 * delta / 120)
+                    canvas.yview_scroll(units, "units")
                 elif event.num == 4:
                     canvas.yview_scroll(-1, "units")
                 elif event.num == 5:
                     canvas.yview_scroll(1, "units")
                 else:
+                    # Windows/other
                     canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                return "break" # Stop propagation
-            except Exception:
+                return "break"  # Stop propagation
+            except Exception as e:
+                print(f"Scroll error: {e}")
                 pass
 
     def is_descendant(self, widget, ancestor):
