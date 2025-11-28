@@ -165,19 +165,25 @@ class ReviewWindow(ctk.CTkToplevel):
                     seat = str(student_info.get('seat', '未知'))
                     
                     # Check JSON existence (primary data source)
-                    # Check JSON existence (primary data source)
+                    # Try room-seat format first
                     json_path = os.path.join(self.reports_dir, f"{room}-{seat}.json")
-                    if os.path.exists(json_path):
+                    file_has_json = os.path.exists(json_path)
+                    
+                    # If not found and room/seat is unknown (or empty), try filename-based JSON
+                    if not file_has_json and (room == '未知' or seat == '未知' or not room or not seat):
+                        base_name = os.path.splitext(f)[0]
+                        fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
+                        file_has_json = os.path.exists(fallback_json_path)
+                        # self.parent_app.log(f"DEBUG: Checking fallback JSON for {f}: {fallback_json_path} -> {file_has_json}")
+                    
+                    if file_has_json:
                         self.image_files.append(f)
-                except: pass
-                
-            # If no files found via JSON check, maybe fallback to all files?
-            # User wants "only show completed", so strict filtering is better.
-            if not self.image_files and all_files:
-                # Fallback: If 0 reports found but images exist, maybe show all?
-                # But user specifically asked for "only completed".
-                # So we keep it empty if no reports.
-                pass
+                    else:
+                        self.parent_app.log(f"DEBUG: Skipping {f}, no JSON found. (Room: {room}, Seat: {seat})")
+                except Exception as e:
+                    self.parent_app.log(f"DEBUG: Error checking {f}: {e}")
+            
+            self.parent_app.log(f"DEBUG: load_file_list found {len(self.image_files)} valid files.")
 
     def setup_ui(self):
         # Clear existing widgets
@@ -561,10 +567,13 @@ class ReviewWindow(ctk.CTkToplevel):
         # 1. Load Image (Only if in image mode)
         if self.view_mode == 'image':
             img_path = os.path.join(self.exam_folder, filename)
+            self.parent_app.log(f"DEBUG: Loading image: {img_path}")
             if os.path.exists(img_path):
+                self.parent_app.log("DEBUG: Image file exists.")
                 self.current_image = Image.open(img_path)
                 self.reset_zoom()
             else:
+                self.parent_app.log("DEBUG: Image file NOT found.")
                 self.show_placeholder(self.t("msg_no_images"))
             
         # 2. Resolve Student & Report
@@ -575,10 +584,21 @@ class ReviewWindow(ctk.CTkToplevel):
         json_name = f"{room}-{seat}.json"
         json_path = os.path.join(self.reports_dir, json_name)
         
+        json_loaded = False
         if os.path.exists(json_path):
             with open(json_path, "r", encoding="utf-8") as f:
                 self.current_data = json.load(f)
-        else:
+                json_loaded = True
+        elif room == '未知' or seat == '未知' or not room or not seat:
+            # Fallback: Try loading by filename
+            base_name = os.path.splitext(filename)[0]
+            fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
+            if os.path.exists(fallback_json_path):
+                with open(fallback_json_path, "r", encoding="utf-8") as f:
+                    self.current_data = json.load(f)
+                    json_loaded = True
+        
+        if not json_loaded:
             # Legacy Support: Try to load from CSV
             csv_score = 0
             csv_obj_score = 0
@@ -650,12 +670,24 @@ class ReviewWindow(ctk.CTkToplevel):
         # 3. Load Report Text
         md_name = f"{room}-{seat}.md"
         md_path = os.path.join(self.reports_dir, md_name)
-
         
+        md_content = ""
         if os.path.exists(md_path):
             with open(md_path, "r", encoding="utf-8") as f:
-                self.report_textbox.delete("1.0", "end")
-                self.report_textbox.insert("1.0", f.read())
+                md_content = f.read()
+        elif room == '未知' or seat == '未知' or not room or not seat:
+             # Fallback: Try loading by filename
+            base_name = os.path.splitext(filename)[0]
+            fallback_md_path = os.path.join(self.reports_dir, f"{base_name}.md")
+            if os.path.exists(fallback_md_path):
+                with open(fallback_md_path, "r", encoding="utf-8") as f:
+                    md_content = f.read()
+                    md_path = fallback_md_path # Update path for display
+
+        
+        if md_content:
+            self.report_textbox.delete("1.0", "end")
+            self.report_textbox.insert("1.0", md_content)
         else:
             self.report_textbox.delete("1.0", "end")
             self.report_textbox.insert("1.0", f"No Report Generated\nPath: {md_path}")
