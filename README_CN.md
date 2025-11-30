@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-简体中文 | [English](README.md)
+[English](README.md) | 简体中文
 
 ---
 
@@ -18,9 +18,9 @@
 > 本项目采用 **[NCEL-Strict License (Version 2.0)](./LICENSE)** 进行授权。
 > 这是一个 **源码可见 (Source Available)** 但 **严格受限** 的非商业协议。
 >
-> 🚫 **严禁商业使用**：包括销售、订阅、赞助、**企业内部使用 (Internal Use)**、SaaS 服务及 AI 模型训练。
-> 🚫 **禁止分发修改版**：您**不**可以直接发布修改后的源代码或二进制文件（仅允许分享 Patch/Diff 文件）。
-> 🚫 **Fork 限制**：仅允许为提交 PR 而创建公开 Fork，且必须在 PR 结束后的 14 天内删除。
+> 🚫 **严禁商业使用**：包括销售、订阅、赞助、**企业内部使用 (Internal Use)**、SaaS 服务及 AI 模型训练。  
+> 🚫 **禁止分发修改版**：您**不**可以直接发布修改后的源代码或二进制文件（仅允许分享 Patch/Diff 文件）。  
+> 🚫 **Fork 限制**：仅允许为提交 PR 而创建公开 Fork，且必须在 PR 结束后的 14 天内删除。  
 > ✅ **仅限非商用**：个人学习、学术研究及非商业用途需保留完整的版权声明与许可文件。
 >
 > 💼 **商业授权 / Commercial License**：
@@ -56,8 +56,7 @@
     - 完整中英文支持
     - 配置方案快速切换
 
-> [!NOTE]
-> 本应用依赖模型的**视觉理解**和**推理能力**。建议使用更强大的模型（如 GPT-4o、Gemini 2.5 Pro）以获得最佳效果。
+
 
 ## 🚀 快速开始
 

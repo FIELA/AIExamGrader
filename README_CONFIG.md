@@ -11,6 +11,14 @@
 
 3. Launch the application - it will auto-load the last used profile
 
+## Global Settings
+
+These settings apply to the entire application:
+
+- **language**: Interface language.
+    - `"CN"`: Simplified Chinese (Default)
+    - `"EN"`: English
+
 ## Profile Structure
 
 Each profile can save:
