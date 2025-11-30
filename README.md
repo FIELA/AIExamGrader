@@ -10,16 +10,47 @@
 
 ## 📖 Introduction
 
-**AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed for teachers and educators. It leverages the visual understanding capabilities of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers and generate detailed reports.
+**AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed to transform the exam grading experience for teachers and educators worldwide.
+
+### 🎯 What is AI Exam Grader?
+
+A comprehensive solution that leverages the **visual understanding** and **reasoning capabilities** of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers, with features including:
+
+- 🤖 **Automated Grading**: Batch process hundreds of answer sheets with high accuracy
+- 📊 **Smart Data Management**: Automatic validation, intelligent recovery, and comprehensive reporting
+- 🔍 **Human-in-the-Loop**: Dedicated review interface for quality assurance
+- 🌐 **Full Internationalization**: Seamlessly supports English and Chinese workflows
+
+### 💡 Why Choose AI Exam Grader?
+
+**For Teachers**:
+- ⏱️ **Save Time**: Reduce grading time from hours to minutes
+- 📈 **Improve Accuracy**: Consistent evaluation with AI-powered analysis
+- 📋 **Detailed Reports**: Get comprehensive Markdown reports for each student
+- 🔄 **Easy Re-grading**: Update answer keys and re-grade in one click
+
+**For Institutions**:
+- 📚 **Scalable**: Handle exams with hundreds or thousands of students
+- 💾 **Data Security**: All processing can be done locally with self-hosted models
+- 📊 **Export Ready**: Generate Excel-ready CSV files for further analysis
+- 🔒 **Privacy First**: No data sent to third parties (when using private APIs)
+
+### ✨ Key Highlights
+
+- **Chain Validation**: Automatic pre-checks ensure Answer Key → Layout → CSV integrity before grading
+- **Smart Recovery**: Lost CSV? No problem! Automatically rebuilds from JSON reports
+- **Incremental Processing**: Resume grading anytime - skips already completed files
+- **Bilingual Support**: Handles both Chinese and English folder structures seamlessly
 
 > [!IMPORTANT]
 > **License Notice**
 >
-> This project is licensed under the **[NCEL-Strict+ License (Version 1.3)](./LICENSE)**.
+> This project is licensed under the **[NCEL-Strict License (Version 2.0)](./LICENSE)**.
 > This is a **Source Available** but **Strictly Limited** non-commercial license.
 >
 > 🚫 **Commercial Use Strictly Prohibited**: Includes sale, subscription, sponsorship, **Internal Use**, SaaS services, and AI model training.
 > 🚫 **Distribution of Modified Versions Prohibited**: You may **NOT** directly distribute modified source code or binaries (only Patch/Diff files are allowed).
+> 🚫 **Fork Restriction**: Public Forks are allowed ONLY for submitting PRs and must be deleted within 14 days after the PR is closed.
 > ✅ **Non-Commercial Only**: Personal study, academic research, and non-commercial use must retain the full copyright notice and license file.
 >
 > 💼 **Commercial License**:
@@ -27,35 +58,36 @@
 
 ## ✨ Features
 
-### Core Capabilities
+-   **🤖 Intelligent Grading Engine**
+    -   **Multi-Model Support**: 
+        - Supports OpenAI (GPT-4o, etc.) and compatible APIs (Custom Base URL)
+        - Supports Google Gemini (gemini-3.0-pro, etc.)
+    -   **Smart OCR Recognition**: Automatically extracts handwritten student names, IDs, and class information
+    -   **Flexible Grading Rubrics**: Supports custom rubrics for precise subjective question grading
+    -   **Batch Concurrent Processing**: Multi-threaded architecture for high-speed grading of large batches
 
--   **Multi-Model Support**: 
-    -   Supports OpenAI (GPT-4o, GPT-4o-mini, etc.) and OpenAI-compatible APIs with custom base URLs
-    -   Supports Google Gemini (gemini-2.5-pro, gemini-2.0-flash, etc.)
-    -   Easy to switch between different providers and models
-    
     > [!NOTE]
-    > This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 2.5 Pro).
-    
--   **Smart Recognition**: Automatically extracts handwritten student names, IDs, and class information using OCR.
--   **Flexible Grading**: Supports custom rubrics for precise subjective question grading.
--   **Batch Processing**: Multi-threaded processing for high-speed grading of large batches.
--   **Manual Review**: A dedicated interface to review, verify, and correct AI grading results.
--   **Data Verification**: Automatically validates OCR-extracted info against your student database.
--   **Detailed Reporting**:
-    -   Generates individual Markdown grading reports for each student.
-    -   **Enhanced CSV Export**: 
-        -   Detailed breakdown of Subjective (Main/Sub) and Objective (Answer/Score) questions.
-        -   Bilingual headers (English/Chinese) based on app language.
-        -   Custom column sorting for optimal readability.
--   **Automated Pre-checks**: Automatically checks for and generates Answer Key, Layout, and CSV headers before grading to prevent errors.
--   **Internationalization**: Fully localized interface in English and Simplified Chinese.
+    > This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 3.0 Pro).
 
-### New Features (v1.2)
+-   **📊 Smart Data Management**
+    - Chain auto-validation (Answer Key → Layout → CSV)
+    - Automatic CSV rebuild when missing
+    - Incremental processing with resume capability
+    - Seamless CN/EN directory support
 
--   **🚀 Configuration Profiles**: Save and quickly switch between different grading configurations.
--   **📊 Enhanced Progress Tracking**: Real-time progress display, phase-based processing, and ETR updates.
--   **🎨 UI Refresh**: Modern interface with improved Review Window (scroll controls, cursor fixes) and safe application exit.
+-   **🔍 Manual Review System**
+    - Three-step review process (Info → Objective → Subjective)
+    - Dual-mode viewing (Text/Image)
+    - Smart navigation and search
+    - Complete review history tracking
+
+-   **📋 Comprehensive Reports + 🌐 Internationalization**
+    - Markdown reports + Enhanced CSV + Structured JSON
+    - Full Chinese-English support
+    - Quick-switch configuration profiles
+
+> [!NOTE]
+> This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 2.5 Pro).
 
 ## 🚀 Quick Start
 
@@ -106,8 +138,151 @@ The executable (`.exe`) will be generated in the `dist/` folder.
 
 ## 🛠️ Usage Guide
 
-### 1. Configuration
-... (Same as before)
+### Quick Workflow (5 Steps)
+
+#### Step 1: Configure API
+
+```
+API Settings
+├─ API Key: Enter your API key
+├─ Service Provider: OpenAI / Gemini
+├─ Model Name: gpt-4o / gemini-1.5-pro
+└─ Base URL: (Optional)
+```
+
+#### Step 2: Upload Resources
+
+```
+Resource Files
+├─ 📄 Rubric: Upload exam questions and answers document
+├─ 📁 Answer Sheets Folder: Select folder containing scanned images
+└─ 👥 Student List: (Optional) Upload Excel/CSV student roster
+```
+
+#### Step 3: Start Grading
+
+Click **"Start Grading"** button
+
+**Automated Flow**:
+```
+Check Answer Key → Confirm Answers → Detect Layout → Confirm Layout → Generate CSV → Start Grading
+```
+
+**User Interaction Points**:
+- 🔍 **Answer Key Confirmation**: Confirm AI-extracted answers on first run
+- 🔍 **Layout Description Confirmation**: Confirm answer sheet structure on first run
+
+#### Step 4: Manual Review
+
+After grading completes, click **"Review"** button
+
+**Three-Step Review Process**:
+```
+Step 1: Verify Student Information
+Step 2: Verify Objective Questions
+Step 3: Verify Subjective Question Scores
+```
+
+**Quick Actions**:
+- 📝/🖼 Toggle Text/Image Mode
+- ⬅️/➡️ Previous/Next Student
+- 🔍 Search Student (Name/ID)
+- ✅ Confirm and Continue
+
+#### Step 5: Export Results
+
+```
+Output File Locations
+├─ 📊 Grade_Summary.csv (in grading_data/ folder)
+├─ 📝 Grading_Report.md (in reports/ folder, one per student)
+└─ 📄 Student_Data.json (in reports/ folder, one per student)
+```
+
+### Directory Structure (Auto-Generated)
+
+When you start grading, the application automatically creates:
+
+```
+Answer Sheets Folder/
+├─ grading_data/              # Configuration and summary data
+│   ├─ answer_key.json       # Standard answers
+│   ├─ layout_config.json    # Answer sheet layout
+│   └─ Grade_Summary.csv     # Grade summary table
+│
+├─ reports/                   # Grading results
+│   ├─ 01-01.json           # Student grade data
+│   ├─ 01-01.md             # Student grading report
+│   └─ ...
+│
+├─ original_files/           # Original answer sheet backups
+│   └─ *.jpg/png
+│
+├─ success/                  # Successfully graded sheets
+│   └─ *.jpg/png
+│
+└─ failed/                   # Failed grading attempts
+    └─ *.jpg/png
+```
+
+### Data Validation Flow
+
+```
+Start Grading → Answer Key → Layout Config → CSV File → File Integrity → Begin Grading
+     ↓             ↓            ↓             ↓            ↓              ↓
+Basic Check   Smart Extract  Auto-Detect  Smart Recovery  Incremental  Batch Process
+```
+
+**Key Features**:
+- ✅ **Chain Validation**: Answer Key → Layout → CSV → Grading
+- ✅ **Smart Recovery**: Automatically rebuilds CSV from JSON if missing
+- ✅ **Incremental Processing**: Only grades incomplete files
+- ✅ **Auto Migration**: Legacy files automatically moved to new structure
+- ✅ **User Confirmation**: Answer key and layout require user approval
+- ✅ **Data Consistency**: Rebuilds CSV after grading to ensure accuracy
+
+### Output Files Explained
+
+**Grade Summary (CSV)**  
+Contains complete grades and information for all students
+- Basic Info: Room, Seat, Name, ID, Class
+- Scores: Total, Objective, Subjective, Individual Questions
+- OCR Info: Recognized name, ID, etc.
+- Review Status: Unreviewed/Reviewed/Second Review
+
+**Grading Report (Markdown)**  
+Detailed grading report for each student
+- Student information verification
+- Objective question answer comparison table
+- Subjective question analysis for each question
+- Total score statistics
+
+**Grade Data (JSON)**  
+Structured data containing all grading details
+- Used for data recovery
+- Supports secondary development
+- Review history records
+
+### Best Practices
+
+**Before Grading**
+- ✅ Prepare high-resolution scanned answer sheets
+- ✅ Prepare complete rubric document
+- ✅ Check API quota is sufficient
+
+**During Grading**
+- ✅ Maintain stable network connection
+- ✅ Do not close the application window
+- ✅ Monitor progress and logs
+
+**During Review**
+- ✅ Verify each student's information individually
+- ✅ Focus on checking subjective question scores
+- ✅ Use search function to quickly locate students
+
+**After Completion**
+- ✅ Export CSV to a safe location
+- ✅ Backup the grading data folder
+- ✅ Verify CSV row count matches student count
 
 ## 📂 Project Structure
 
@@ -118,14 +293,21 @@ AIExamGrader/
 ├── student_manager.py      # Student database management
 ├── grader_engine.py        # AI grading engine
 ├── review_window.py        # Manual review interface
+├── standard_answer_dialog.py # Standard answer configuration
+├── splash_screen.py        # Application splash screen
 ├── translations.py         # Internationalization
 ├── utils.py                # Helper functions
+├── tooltip.py              # Tooltip widget
 ├── theme.py                # UI Theme definitions
+├── generate_icon.py        # Icon generation script
 ├── config_example.json     # Example configuration
 ├── README_CONFIG.md        # Configuration guide
 ├── requirements.txt        # Dependencies
+├── rthook_google.py        # PyInstaller runtime hook
 ├── build.py                # macOS build script
-└── build_windows.py        # Windows build script
+├── build_windows.py        # Windows build script
+├── test_core.py            # Core functionality tests
+└── test_review_logs.py     # Review log tests
 ```
 
 ## 🔧 Configuration Files
@@ -140,7 +322,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for de
 
 ## 📄 License
 
-This project is licensed under the **NCEL-Strict+ License (Version 1.1)** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **NCEL-Strict License (Version 2.0)** - see the [LICENSE](LICENSE) file for details.
 
 **For commercial use, please contact the project author for licensing options: nicofiela@outlook.com**
 

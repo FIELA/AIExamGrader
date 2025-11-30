@@ -1,22 +1,24 @@
-# NCEL-Strict+ License
-Version 1.1 — 2025
-Non-Commercial Exclusive License (Strict+ Variant)
+# NCEL-Strict License
+**Version 2.0 — 2025**
+Non-Commercial Exclusive License (Strict Variant)
 
-Copyright (c) 2025
-Author: JASim
-Contact: nicofiela@outlook.com
+**Copyright (c) 2025 JASim**
+**Contact: nicofiela@outlook.com**
 
 -----------------------------------------------------------------------
 
 ## 1. Definitions
 
-“Software” refers to the original work, source code, binaries, assets, documentation, and any portion thereof distributed under this License.
+**1.1 “Software”** refers to the original work, source code, binaries, assets, documentation, and any portion thereof distributed under this License.
 
-“You” refers to any individual or entity who obtains, downloads, or uses the Software.
+**1.2 “You”** (or "The User") refers to any individual or entity who obtains, downloads, or uses the Software.
 
-“Derivative Works” refer to any modification, adaptation, enhancement, translation, extension, patch, or work based upon the Software, regardless of the extent of modification.
+**1.3 “Derivative Works”** refer to any modification, adaptation, enhancement, translation, extension, patch, or work based upon the Software. This includes, but is not limited to:
+   (a) Compiled binaries, obfuscated code, and library bindings;
+   (b) Machine learning model weights, parameters, or embeddings trained or fine-tuned using the Software;
+   (c) **Any output, artifact, dataset, or generated content (e.g., generated code, images, UI structures) created using the Software, where such output incorporates identifiable logic, structure, data, or is materially and non-trivially influenced by the Software, including outputs whose structure or content could not have been created in the same form without use of the Software.**
 
-“Patch File” refers to a file containing only the differences between your changes and the original Software, with minimal context required to apply the patch, and which contains no substantial portion of the original Software.
+**1.4 “Patch File”** refers to a file containing only the differences between your changes and the original Software (e.g., `.diff` or `.patch` files), with minimal context required to apply the patch, and which contains no substantial portion of the original Software.
 
 -----------------------------------------------------------------------
 
@@ -25,7 +27,7 @@ Contact: nicofiela@outlook.com
 You are granted a non-exclusive, worldwide, royalty-free license to:
 
 (1) Use the Software for personal, educational, academic research, or non-commercial internal purposes.
-(2) Modify the Software and create Derivative Works for private use only, without distribution except as explicitly permitted in Section 5.
+(2) Modify the Software and create Derivative Works for **private use only**, without distribution except as explicitly permitted in Section 5.
 
 No ownership rights are transferred.
 
@@ -36,8 +38,8 @@ No ownership rights are transferred.
 Unless prior written authorization is obtained from the Author:
 
 - Any direct or indirect commercial use of the Software is strictly prohibited.
-- Any direct or indirect commercial use of Derivative Works is strictly prohibited.
-- Any product or service incorporating, depending on, or derived from the Software or Derivative Works may not be monetized, licensed, sold, rented, or used in revenue-generating contexts.
+- Any direct or indirect commercial use of Derivative Works (including generated outputs as defined in 1.3) is strictly prohibited.
+- Any product or service incorporating, depending on, or derived from the Software may not be monetized, licensed, sold, rented, or used in revenue-generating contexts.
 
 **Commercial Use includes, but is not limited to:**
 
@@ -46,7 +48,7 @@ Unless prior written authorization is obtained from the Author:
 (c) Internal use by commercial entities if such use contributes to revenue, product development, service delivery, competitive advantage, or commercial benefit.
 (d) Use of the Software in marketing, advertising, promotion, demonstrations, or any activity enhancing commercial value.
 (e) Soliciting donations, sponsorship, or crowdfunding tied to the Software or Derivative Works.
-(f) Using the Software or Derivative Works for training, fine-tuning, dataset creation, or development of machine learning or AI systems.
+(f) Using the Software, Derivative Works, or its outputs for training, fine-tuning, dataset creation, or development of machine learning or AI systems.
 
 -----------------------------------------------------------------------
 
@@ -57,6 +59,8 @@ You may redistribute only the unmodified original Software under the following c
 (1) This License must be included in full with the distributed copy.
 (2) No additional legal or technical restrictions may be imposed on recipients.
 (3) You may not misrepresent authorship or the origin of the Software.
+
+**Redistribution includes making the Software available through public platforms, mirrors, forks, source hosting services, or peer-to-peer networks.**
 
 -----------------------------------------------------------------------
 
@@ -69,8 +73,8 @@ Distribution of Derivative Works—including modified source code, pre-patched f
 (a) You may distribute modifications solely in the form of Patch Files.
 (b) Patch Files must contain only your changes and minimal necessary context.
 (c) Patch Files must not include substantial portions of the original Software.
-(d) Recipients must have a lawful copy of the original Software to apply the patch.
-(e) Patch Files must clearly reference the original Software and contain a notice stating that the Patch is governed by this License.
+(d) Patch Files clearly reference the original Software and contain a notice stating that the Patch is governed by this License.
+(e) Patch Files may not be used to distribute Derivative Works for purposes that would otherwise violate Section 3 (Commercial Use Prohibited).
 
 **Prohibited Sharing:**
 
@@ -81,7 +85,23 @@ Distribution of Derivative Works—including modified source code, pre-patched f
 
 -----------------------------------------------------------------------
 
-## 6. Prohibition of Relicensing and Additional Terms
+## 6. Forking Restriction (Strict PR-Only Policy)
+
+**6.1 General Prohibition:**
+Publicly displaying, hosting, or distributing the Software or Derivative Works (e.g., via a public GitHub "Fork" or mirrored repository) is prohibited, except as permitted in Section 6.2.
+
+**6.2 Contribution Exception:**
+You may create a public Fork or copy **solely** for the purpose of developing and submitting contributions (Pull Requests / Merge Requests) to the original Project owned by the Author. Public Forks created under this exception may contain modified code and Patch Files intended solely for contribution review. **Any content in a public Fork must be strictly limited to the minimum necessary to facilitate code review.**
+
+**6.3 Transient Existence (Time Limit):**
+A public Fork must be deleted or converted to a private repository within **14 days** after:
+(a) The Pull Request is merged, rejected, withdrawn, or closed; or
+(b) No new Pull Request activity occurs.
+**Failure to delete an expired public Fork constitutes unauthorized distribution under Section 5.**
+
+-----------------------------------------------------------------------
+
+## 7. Prohibition of Relicensing and Additional Terms
 
 You may not:
 
@@ -95,23 +115,56 @@ Any attempt to relicense or alter legal terms is invalid and without effect.
 
 -----------------------------------------------------------------------
 
-## 7. Intellectual Property
+## 8. Intellectual Property
 
 All rights not expressly granted remain the exclusive property of the Author.
 No patent, trademark, or other IP rights are granted unless explicitly stated.
 
 -----------------------------------------------------------------------
 
-## 8. No Warranty
+## 9. Patent Retaliation
+
+If You institute patent litigation against the Author or any other entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Software or any Derivative Work constitutes direct or contributory patent infringement, then all rights granted to You under this License shall terminate automatically as of the date such litigation is filed.
+
+-----------------------------------------------------------------------
+
+## 10. No Warranty
 
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
 
 -----------------------------------------------------------------------
 
-## 9. Acceptance
+## 11. Jurisdiction
 
-By downloading, installing, copying, using, or modifying the Software, you agree to be bound by the terms of this License.
-If you do not agree, you must not use the Software.
+This License shall be governed by and construed in accordance with the laws of the jurisdiction in which the Author is domiciled at the time of any legal dispute, without regard to its conflict of law principles. The application of the United Nations Convention on Contracts for the International Sale of Goods is expressly excluded.
+
+Any legal action or proceeding arising under this License shall be brought exclusively in the courts having competent jurisdiction over the Author’s domicile at the time of such dispute. You hereby waive any objection to venue or the doctrine of forum non conveniens in connection with such courts.
 
 -----------------------------------------------------------------------
-END OF NCEL-Strict+ LICENSE VERSION 1.1
+
+## 12. Termination
+
+**12.1 Automatic Termination:**
+All rights granted under this License automatically terminate if You violate any term of this License. **Termination is automatic and does not require notice from the Author.**
+
+**12.2 Consequences of Termination:**
+Upon termination, You must immediately cease all use, distribution, and modification of the Software, and must delete all copies, including Derivative Works, Patch Files, and generated artifacts that constitute Derivative Works as defined in Section 1.3, in Your possession or control.
+
+**12.3 Reinstatement:**
+Rights may be reinstated only upon explicit written permission from the Author.
+
+-----------------------------------------------------------------------
+
+## 13. Anti-Circumvention
+
+You may not attempt to circumvent, avoid, or bypass any restrictions in this License, whether by technical, legal, or procedural means, including but not limited to automated systems, remote execution, proxy users, or indirect distribution channels.
+
+-----------------------------------------------------------------------
+
+## 14. Acceptance
+
+By downloading, installing, copying, using, or modifying the Software, You agree to be bound by the terms of this License.
+If You do not agree, you must not use the Software.
+
+-----------------------------------------------------------------------
+END OF NCEL-Strict LICENSE VERSION 2.0

@@ -1,3 +1,9 @@
+# Copyright (c) 2025 JASim. Licensed under NCEL-Strict License v2.0.
+# STRICT NON-COMMERCIAL USE ONLY. No AI/ML training, fine-tuning, or public distribution of Derivative Works.
+# Modifications may only be shared as Patch Files.
+# Public forks allowed solely for PRs (delete within 14 days after PR merged, rejected, or closed).
+# Commercial licensing inquiries: nicofiela@outlook.com. See LICENSE file for full terms.
+
 TRANSLATIONS = {
     "CN": {
         "app_title": "AI 智能阅卷助手",
@@ -238,7 +244,7 @@ TRANSLATIONS = {
         "log_consolidating_layout": "🔄 正在整合布局信息...",
         "log_layout_confirmed_generated": "✅ 已确认，已生成 layout_config.json",
         "log_no_grade_summary": "❌ 未检测到成绩汇总表，正在生成...",
-        "log_grade_summary_generated": "✅ 已生成 Grade_Summary.csv",
+        "log_grade_summary_generated": "✅ 已生成 {filename}",
         "log_checking_completed": "🔍 正在检查已完成的文件...",
         "log_files_to_process": "📝 需要处理 {count} 个文件。",
         "log_start_processing": "🚀 启动处理，共 {total} 张，剩余 {pending} 张",
@@ -250,6 +256,12 @@ TRANSLATIONS = {
         "log_updating_summary_csv": "🔄 正在更新成绩汇总表...",
         "log_batch_regrade_complete": "✅ 批量重新评分完成。已更新 {updated}/{total} 名学生。",
         "log_answer_key_changes": "🔄 检测到第 {qid} 题标准答案变更",
+        
+        # CSV Rebuild Messages
+        "log_csv_missing_has_data": "⚠️ 未找到CSV文件，但检测到已有成绩数据。",
+        "log_rebuilding_csv_from_reports": "📊 正在从 {count} 份成绩报告重建CSV...",
+        "log_csv_rebuild_complete": "✅ CSV重建完成，包含所有已评分学生的成绩。",
+        "log_files_completed": "✅ 已完成 {count} 个文件，跳过。",
         
         "btn_get_models": "获取模型列表",
         "btn_test_connection": "检查可用性",
@@ -490,7 +502,7 @@ TRANSLATIONS = {
         "log_consolidating_layout": "🔄 Consolidating layout information...",
         "log_layout_confirmed_generated": "✅ Confirmed, layout_config.json generated",
         "log_no_grade_summary": "❌ Grade Summary CSV not found, generating...",
-        "log_grade_summary_generated": "✅ Grade_Summary.csv generated",
+        "log_grade_summary_generated": "✅ {filename} generated",
         "log_checking_completed": "🔍 Checking completed files...",
         "log_files_to_process": "📝 {count} files need processing.",
         "log_start_processing": "🚀 Starting. Total: {total}, Pending: {pending}",
@@ -502,6 +514,12 @@ TRANSLATIONS = {
         "log_updating_summary_csv": "🔄 Updating summary CSV...",
         "log_batch_regrade_complete": "✅ Batch re-grading complete. Updated {updated}/{total} students.",
         "log_answer_key_changes": "🔄 Answer key changes detected for Q: {qid}",
+        
+        # CSV Rebuild Messages
+        "log_csv_missing_has_data": "⚠️ CSV file not found, but existing grade data detected.",
+        "log_rebuilding_csv_from_reports": "📊 Rebuilding CSV from {count} grade reports...",
+        "log_csv_rebuild_complete": "✅ CSV rebuild complete with all graded students.",
+        "log_files_completed": "✅ {count} files completed, skipping.",
         
         "btn_get_models": "Get Models",
         "btn_test_connection": "Test Connection",
