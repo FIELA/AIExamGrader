@@ -18,9 +18,9 @@
 > This project is licensed under the **[NCEL-Strict License (Version 2.0)](./LICENSE)**.
 > This is a **Source Available** but **Strictly Limited** non-commercial license.
 >
-> 🚫 **Commercial Use Strictly Prohibited**: Includes sale, subscription, sponsorship, **Internal Use**, SaaS services, and AI model training.
-> 🚫 **Distribution of Modified Versions Prohibited**: You may **NOT** directly distribute modified source code or binaries (only Patch/Diff files are allowed).
-> 🚫 **Fork Restriction**: Public Forks are allowed ONLY for submitting PRs and must be deleted within 14 days after the PR is closed.
+> 🚫 **Commercial Use Strictly Prohibited**: Includes sale, subscription, sponsorship, **Internal Use**, SaaS services, and AI model training.  
+> 🚫 **Distribution of Modified Versions Prohibited**: You may **NOT** directly distribute modified source code or binaries (only Patch/Diff files are allowed).  
+> 🚫 **Fork Restriction**: Public Forks are allowed ONLY for submitting PRs and must be deleted within 14 days after the PR is closed.  
 > ✅ **Non-Commercial Only**: Personal study, academic research, and non-commercial use must retain the full copyright notice and license file.
 >
 > 💼 **Commercial License**:
