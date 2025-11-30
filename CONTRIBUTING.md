@@ -16,7 +16,7 @@ We love new ideas! If you have a feature request, please open an issue and descr
 - Your proposed solution.
 
 ### Pull Requests
-1.  **Fork the repository**.
+1.  **Fork the repository**. (Permitted under the "Contribution Exception" in the License. **Note: Public forks must be deleted within 14 days of PR closure.**)
 2.  **Create a new branch** for your feature or fix: `git checkout -b feature/my-new-feature`.
 3.  **Make your changes**. Ensure your code follows the existing style.
 4.  **Test your changes**. Run the application to make sure everything works as expected.
@@ -30,4 +30,4 @@ We love new ideas! If you have a feature request, please open an issue and descr
 - Add comments where necessary to explain complex logic.
 
 ## License
-By contributing, you agree that your contributions will be licensed under the Non-Commercial Educational License (NCEL-1.0).
+By contributing, you agree that your contributions will be licensed under the **NCEL-Strict License (Version 2.0)**.

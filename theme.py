@@ -1,3 +1,9 @@
+# Copyright (c) 2025 JASim. Licensed under NCEL-Strict License v2.0.
+# STRICT NON-COMMERCIAL USE ONLY. No AI/ML training, fine-tuning, or public distribution of Derivative Works.
+# Modifications may only be shared as Patch Files.
+# Public forks allowed solely for PRs (delete within 14 days after PR merged, rejected, or closed).
+# Commercial licensing inquiries: nicofiela@outlook.com. See LICENSE file for full terms.
+
 
 class Theme:
     # Colors

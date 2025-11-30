@@ -1,3 +1,9 @@
+# Copyright (c) 2025 JASim. Licensed under NCEL-Strict License v2.0.
+# STRICT NON-COMMERCIAL USE ONLY. No AI/ML training, fine-tuning, or public distribution of Derivative Works.
+# Modifications may only be shared as Patch Files.
+# Public forks allowed solely for PRs (delete within 14 days after PR merged, rejected, or closed).
+# Commercial licensing inquiries: nicofiela@outlook.com. See LICENSE file for full terms.
+
 import os
 import sys
 import threading
@@ -1407,7 +1413,7 @@ class App(ctk.CTk):
             # Use Concurrent Extraction & Consolidation (with detailed logging)
             raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
-            self.after(0, lambda: self.log(self.t("log_req_all_received", count=3)))
+    
             
             final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
@@ -1453,10 +1459,11 @@ class App(ctk.CTk):
         self.log_separator() # Add separator before CSV check/generation
         grading_data_dir = self.get_folder_path('grading_data')
         csv_en = "Grade_Summary.csv"
-        csv_cn = "成绩汇总表.csv" # Legacy name support? Or should we enforce Grade_Summary.csv in grading_data?
-
+        csv_cn = "成绩汇总表.csv"
         
-        path_grading_data = os.path.join(grading_data_dir, "Grade_Summary.csv")
+        # Use language-specific filename
+        csv_filename = csv_cn if self.current_lang == "CN" else csv_en
+        path_grading_data = os.path.join(grading_data_dir, csv_filename)
         
         # Legacy paths
         path_en_root = os.path.join(self.exam_folder, csv_en)
@@ -1489,11 +1496,26 @@ class App(ctk.CTk):
             callback()
             return
 
-        # Not exists, generate headers
-        self.log(self.t("log_no_grade_summary"))
-        self.log(self.t("log_request_sent_rocket")) # Simulated for consistency
-        self.generate_csv_headers_from_key()
-        self.log(self.t("log_grade_summary_generated"))
+        # CSV not found - check if we have JSON reports to rebuild from
+        reports_dir = self.get_folder_path('reports')
+        json_files = []
+        if reports_dir and os.path.exists(reports_dir):
+            json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
+        
+        if json_files:
+            # JSON reports exist - rebuild CSV from them
+            self.log(self.t("log_csv_missing_has_data"))
+            self.log(self.t("log_rebuilding_csv_from_reports", count=len(json_files)))
+            self.regenerate_summary_csv()
+            self.log(self.t("log_csv_rebuild_complete"))
+        else:
+            # No JSON reports - generate empty CSV with headers only
+            self.log(self.t("log_no_grade_summary"))
+            self.log("📝 生成空白CSV模板（仅包含表头）...")
+            self.generate_csv_headers_from_key()
+            csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
+            self.log(self.t("log_grade_summary_generated", filename=csv_filename))
+        
         callback()
 
     def generate_csv_headers_from_key(self):
@@ -1582,11 +1604,11 @@ class App(ctk.CTk):
             headers += ['OCR姓名', 'OCR班级', 'OCR考场', 'OCR座号', 'OCR手写考号', 'OCR填涂考号']
             headers += ['原始文件']
             
-        # Write CSV
+        # Write CSV with language-specific filename
         grading_data_dir = self.get_folder_path('grading_data')
         if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
         
-        csv_filename = "Grade_Summary.csv" # Enforce standard name in grading_data
+        csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
         csv_path = os.path.join(grading_data_dir, csv_filename)
         
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
@@ -1784,21 +1806,29 @@ class App(ctk.CTk):
         if not csv_path:
             # Check grading_data first
             grading_data_dir = self.get_folder_path('grading_data')
-            csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            csv_filename = "成绩汇总表.csv" if is_en == False else "Grade_Summary.csv"
+            csv_path = os.path.join(grading_data_dir, csv_filename)
             
             # If not in grading_data, check root (legacy fallback)
 
+            
             # 1. If target_path is None, try to find existing CSV.
             # 2. If no existing CSV, default to grading_data.
             
             existing_csv = None
-            # Check grading_data
-            p1 = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            # Check grading_data first
+            csv_filename_cn = "成绩汇总表.csv"
+            csv_filename_en = "Grade_Summary.csv"
+            current_csv = csv_filename_cn if is_en == False else csv_filename_en
+            p1 = os.path.join(grading_data_dir, current_csv)
             if os.path.exists(p1): existing_csv = p1
             
-            # Check root
-            p2 = os.path.join(self.exam_folder, "Grade_Summary.csv")
+            # Check root (try both names for legacy support)
+            p2 = os.path.join(self.exam_folder, csv_filename_en)
             if not existing_csv and os.path.exists(p2): existing_csv = p2
+            
+            p3 = os.path.join(self.exam_folder, csv_filename_cn)
+            if not existing_csv and os.path.exists(p3): existing_csv = p3
             
             if existing_csv:
                 csv_path = existing_csv
@@ -1971,14 +2001,16 @@ class App(ctk.CTk):
 
     def regenerate_summary_csv(self, target_path=None):
         """Regenerate the entire summary CSV from report JSONs"""
-        reports_dir = os.path.join(self.exam_folder, "reports")
-        if not os.path.exists(reports_dir): return
+        reports_dir = self.get_folder_path('reports')
+        if not reports_dir or not os.path.exists(reports_dir):
+            return
         
         # Determine target path
         if not target_path:
             grading_data_dir = self.get_folder_path('grading_data')
             if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
-            target_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
+            target_path = os.path.join(grading_data_dir, csv_filename)
             
         # Delete existing CSVs to start fresh (check both root and grading_data)
         csv_en = "Grade_Summary.csv"
@@ -2090,6 +2122,7 @@ class App(ctk.CTk):
                     qid = str(item.get('question_id', ''))
                     score = item.get('score', 0)
                     
+                    # FIXED: Use Q prefix consistently to avoid duplication
                     # Sub-question score (e.g. Q17(1))
                     data_dict[f"Q{qid}"] = score
                     
@@ -2100,9 +2133,9 @@ class App(ctk.CTk):
                         main_id = match.group(1)
                         main_q_scores[main_id] = main_q_scores.get(main_id, 0) + score
                 
-                # Add Main Question Totals to dict
+                # Add Main Question Totals to dict with Chinese label
                 for m_id, total in main_q_scores.items():
-                    data_dict[f"Q{m_id} Total"] = total
+                    data_dict[f"Q{m_id} 总分"] = total
 
                 # 2. Objective Details
                 # Sort obj items by question id to be safe
@@ -2502,7 +2535,7 @@ class App(ctk.CTk):
                 return
         
         # Show Dialog to Edit Answer Key
-        from standard_answer_dialog import StandardAnswerReviewDialog
+        from standard_answer_dialog import ObjectiveAnswerEditDialog
         
         old_key = copy.deepcopy(self.answer_key)
         
@@ -2537,9 +2570,8 @@ class App(ctk.CTk):
             # Start batch re-grading in thread
             threading.Thread(target=self.batch_regrade_objective, args=(changed_qids,), daemon=True).start()
         
-        # Show Review Dialog with current answer key
-        report = "Review and update the answer key below. Changes will trigger batch re-grading."
-        StandardAnswerReviewDialog(self, self.answer_key, report, on_confirm_regrade)
+        # Show improved dialog with dropdown selectors
+        ObjectiveAnswerEditDialog(self, self.answer_key, on_confirm_regrade, lang=self.current_lang)
     
     def batch_regrade_objective(self, changed_qids):
         """
@@ -3194,7 +3226,7 @@ class App(ctk.CTk):
 
                 completed_count = len(all_known_files) - len(pending_files)
                 if completed_count > 0:
-                    self.log(f"✅ 已完成 {completed_count} 个文件，跳过。")
+                    self.log(self.t("log_files_completed", count=completed_count))
                 if pending_files:
                     self.log(self.t("log_files_to_process", count=len(pending_files)))
             
@@ -3300,7 +3332,8 @@ class App(ctk.CTk):
                     json_count = md_count = 0
                 
                 grading_data_dir = self.get_folder_path('grading_data')
-                csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+                csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
+                csv_path = os.path.join(grading_data_dir, csv_filename)
                 csv_rows = 0
                 if os.path.exists(csv_path):
                     try:
@@ -3364,10 +3397,21 @@ class App(ctk.CTk):
         self.regenerate_csv_from_jsons()
 
     def regenerate_csv_from_jsons(self):
-        reports_dir = os.path.join(self.exam_folder, "reports")
-        if not os.path.exists(reports_dir): return
+        # Use get_folder_path which handles both "reports" and "阅卷报告"
+        reports_dir = self.get_folder_path('reports')
+        
+        if not reports_dir or not os.path.exists(reports_dir):
+            # Try alternative: check both possible names manually
+            for possible_name in ['reports', '阅卷报告']:
+                alt_path = os.path.join(self.exam_folder, possible_name) if self.exam_folder else None
+                if alt_path and os.path.exists(alt_path):
+                    reports_dir = alt_path
+                    break
+            else:
+                return
         
         json_files = [f for f in os.listdir(reports_dir) if f.endswith(".json")]
+        
         all_summaries = []
         
         is_en = (self.current_lang == "EN")
@@ -3389,151 +3433,156 @@ class App(ctk.CTk):
              pass
 
         for jf in json_files:
-            with open(os.path.join(reports_dir, jf), "r", encoding="utf-8") as f:
-                data = json.load(f)
-                db_info = data.get('db_student_info', {})
-                
-                # Re-calculate consistency/scores for summary
-                _, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
-                
-                # Determine Review Status
-                review_count = data.get('review_count', 0)
-                review_status = ""
-                if review_count == 1:
-                    review_status = "Reviewed" if is_en else "已复审"
-                elif review_count >= 2:
-                    review_status = "Second Review" if is_en else "已二次复审"
-                
-                # Get Confirm Absence with proper translation
-                confirm_absence_value = data.get('confirm_absence', '')
-                if is_en:
-                    confirm_absence_display = confirm_absence_value
-                else:
-                    if confirm_absence_value == 'Yes':
-                        confirm_absence_display = "确认缺考"
-                    else:
-                        confirm_absence_display = confirm_absence_value
-                
-                total_score = data.get('total_score', 0)
-                subj_score_sum = total_score - obj_score_sum
-                if subj_score_sum < 0: subj_score_sum = 0
-
-                summary = {
-                    '考场': db_info.get('room', '未知'), 
-                    '座号': db_info.get('seat', '未知'), 
-                    '班级': db_info.get('class', '未知'), 
-                    '姓名': db_info.get('name', '未知'), 
-                    '考号': db_info.get('id', '未知'),
-                    '信息一致性': consistency_note,
-                    '匹配项数': matches,
-                    '复审状态': review_status,
-                    '缺考标记': data.get('缺考标记', ''),
-                    '确认缺考': confirm_absence_display,
-                    '总分': total_score,
-                    '客观题': obj_score_sum,
-                    '主观题': subj_score_sum,
-                    'OCR姓名': data.get('ocr_name', ''),
-                    'OCR班级': data.get('ocr_class', ''),
-                    'OCR考场': data.get('ocr_room', ''),
-                    'OCR座号': data.get('ocr_seat', ''),
-                    'OCR手写考号': data.get('ocr_id_written', ''),
-                    'OCR填涂考号': data.get('ocr_id_filled', ''),
-                    '原始文件': data.get('original_image', '') or data.get('original_filename', ''),
-                    '重命名文件': data.get('renamed_filename', '')
-                }
-                
-                # Translate Absence Markers if EN
-                if is_en:
-                    if summary.get('缺考标记') == '是': summary['缺考标记'] = 'Yes'
-                
-                # Add Sub-scores (Subjective)
-                # We need to ensure we have all sub-scores. generate_report_content returns sub_scores_dict
-                # which contains QID -> Score.
-                summary.update(sub_scores_dict)
-                
-                # Add Objective Answers and Scores
-                details = data.get('details', [])
-                objective_q = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
-                for item in objective_q:
-                    qid = str(item.get('question_id', ''))
-                    ans = item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')
-                    score = item.get('score', 0)
-                    summary[f"Q{qid} Answer"] = ans
-                    summary[f"Q{qid} Score"] = score
-
-                # If EN, translate keys in summary
-                if is_en:
-                    new_summary = {}
-                    for k, v in summary.items():
-                        new_key = header_map.get(k, k)
-                        # Translate Q-keys if needed? "Q1 Answer" -> "Q1 Answer" (Already EN)
-
- 
-                        # CN: "Q1 答案", "Q1 得分", "Q17 总分", "Q17(1) 得分"
-                        # EN: "Q1 Answer", "Q1 Score", "Q17 Total", "Q17(1) Score"
-                        
-
- 
-
-                        
-                        if k.endswith(" Answer"):
-                             new_key = k # Already EN
-                        elif k.endswith(" Score"):
-                             new_key = k # Already EN
-                        elif k.endswith(" Total"):
-                             new_key = k # Already EN
-                        
-                        new_summary[new_key] = v
-                    all_summaries.append(new_summary)
-                else:
-                    # CN Mode: Translate "Q... Answer" to "Q... 答案" etc.
-                    new_summary = {}
-                    for k, v in summary.items():
-                        if k.endswith(" Answer"):
-                            new_key = k.replace(" Answer", " 答案")
-                        elif k.endswith(" Score"):
-                            new_key = k.replace(" Score", " 得分")
-                        elif k.endswith(" Total"):
-                            new_key = k.replace(" Total", " 总分")
-                        elif re.match(r"Q\d+\(\d+\)$", k): # Q17(1) -> Q17(1) 得分 (if it's just the key)
-                             # sub_scores_dict keys are just "17(1)" or "17"
-
-
-
-                             pass
-                        
-
-                        pass
+            try:
+                with open(os.path.join(reports_dir, jf), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    db_info = data.get('db_student_info', {})
                     
-                    # Re-do the loop to be cleaner
-                    final_summary = {}
-                    for k, v in summary.items():
-                        # Handle fixed headers
-                        if k in header_map:
-                            final_summary[k] = v
-                            continue
-                            
-                        # Handle Dynamic Headers
-                        # Objective: Q{qid} Answer, Q{qid} Score
-                        if k.endswith(" Answer"):
-                            final_summary[k.replace(" Answer", " 答案")] = v
-                        elif k.endswith(" Score"):
-                            final_summary[k.replace(" Score", " 得分")] = v
-                        # Subjective: Q{qid} Total (from save_markdown logic)
-                        elif k.endswith(" Total"):
-                            final_summary[k.replace(" Total", " 总分")] = v
-                        # Subjective Sub-questions: "17(1)", "17"
-                        # We need to detect these.
-                        elif re.match(r"\d+(\(\d+\))?", k):
-                             # This is likely a subjective score key from sub_scores_dict
-                             if "(" in k:
-                                 final_summary[f"Q{k} 得分"] = v
-                             else:
-                                 # Main question total (if not handled by Q.. Total)
-                                 final_summary[f"Q{k} 总分"] = v
+                    # Re-calculate consistency/scores for summary
+                    _, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_info)
+                    
+                    # Determine Review Status
+                    review_count = data.get('review_count', 0)
+                    review_status = ""
+                    if review_count == 1:
+                        review_status = "Reviewed" if is_en else "已复审"
+                    elif review_count >= 2:
+                        review_status = "Second Review" if is_en else "已二次复审"
+                    
+                    # Get Confirm Absence with proper translation
+                    confirm_absence_value = data.get('confirm_absence', '')
+                    if is_en:
+                        confirm_absence_display = confirm_absence_value
+                    else:
+                        if confirm_absence_value == 'Yes':
+                            confirm_absence_display = "确认缺考"
                         else:
-                            final_summary[k] = v
-                    all_summaries.append(final_summary)
+                            confirm_absence_display = confirm_absence_value
+                    
+                    total_score = data.get('total_score', 0)
+                    subj_score_sum = total_score - obj_score_sum
+                    if subj_score_sum < 0: subj_score_sum = 0
+
+                    summary = {
+                        '考场': db_info.get('room', '未知'), 
+                        '座号': db_info.get('seat', '未知'), 
+                        '班级': db_info.get('class', '未知'), 
+                        '姓名': db_info.get('name', '未知'), 
+                        '考号': db_info.get('id', '未知'),
+                        '信息一致性': consistency_note,
+                        '匹配项数': matches,
+                        '复审状态': review_status,
+                        '缺考标记': data.get('缺考标记', ''),
+                        '确认缺考': confirm_absence_display,
+                        '总分': total_score,
+                        '客观题': obj_score_sum,
+                        '主观题': subj_score_sum,
+                        'OCR姓名': data.get('ocr_name', ''),
+                        'OCR班级': data.get('ocr_class', ''),
+                        'OCR考场': data.get('ocr_room', ''),
+                        'OCR座号': data.get('ocr_seat', ''),
+                        'OCR手写考号': data.get('ocr_id_written', ''),
+                        'OCR填涂考号': data.get('ocr_id_filled', ''),
+                        '原始文件': data.get('original_image', '') or data.get('original_filename', ''),
+                        '重命名文件': data.get('renamed_filename', '')
+                    }
+                    
+                    # Translate Absence Markers if EN
+                    if is_en:
+                        if summary.get('缺考标记') == '是': summary['缺考标记'] = 'Yes'
+                    
+                    # Add Sub-scores (Subjective)
+                    # We need to ensure we have all sub-scores. generate_report_content returns sub_scores_dict
+                    # which contains QID -> Score.
+                    summary.update(sub_scores_dict)
+                    
+                    # Add Objective Answers and Scores
+                    details = data.get('details', [])
+                    objective_q = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+                    for item in objective_q:
+                        qid = str(item.get('question_id', ''))
+                        ans = item.get('student_answer', '') or item.get('student_text', '') or item.get('answer', '')
+                        score = item.get('score', 0)
+                        summary[f"Q{qid} Answer"] = ans
+                        summary[f"Q{qid} Score"] = score
+
+                    # If EN, translate keys in summary
+                    if is_en:
+                        new_summary = {}
+                        for k, v in summary.items():
+                            new_key = header_map.get(k, k)
+                            # Translate Q-keys if needed? "Q1 Answer" -> "Q1 Answer" (Already EN)
+
+ 
+                            # CN: "Q1 答案", "Q1 得分", "Q17 总分", "Q17(1) 得分"
+                            # EN: "Q1 Answer", "Q1 Score", "Q17 Total", "Q17(1) Score"
+                            
+
+ 
+
+                            
+                            if k.endswith(" Answer"):
+                                 new_key = k # Already EN
+                            elif k.endswith(" Score"):
+                                 new_key = k # Already EN
+                            elif k.endswith(" Total"):
+                                 new_key = k # Already EN
+                            
+                            new_summary[new_key] = v
+                        all_summaries.append(new_summary)
+                    else:
+                        # CN Mode: Translate "Q... Answer" to "Q... 答案" etc.
+                        new_summary = {}
+                        for k, v in summary.items():
+                            if k.endswith(" Answer"):
+                                new_key = k.replace(" Answer", " 答案")
+                            elif k.endswith(" Score"):
+                                new_key = k.replace(" Score", " 得分")
+                            elif k.endswith(" Total"):
+                                new_key = k.replace(" Total", " 总分")
+                            elif re.match(r"Q\d+\(\d+\)$", k): # Q17(1) -> Q17(1) 得分 (if it's just the key)
+                                 # sub_scores_dict keys are just "17(1)" or "17"
+
+
+
+                                 pass
+                            
+
+                            pass
+                        
+                        # Re-do the loop to be cleaner
+                        final_summary = {}
+                        for k, v in summary.items():
+                            # Handle fixed headers
+                            if k in header_map:
+                                final_summary[k] = v
+                                continue
+                                
+                            # Handle Dynamic Headers
+                            # Objective: Q{qid} Answer, Q{qid} Score
+                            if k.endswith(" Answer"):
+                                final_summary[k.replace(" Answer", " 答案")] = v
+                            elif k.endswith(" Score"):
+                                final_summary[k.replace(" Score", " 得分")] = v
+                            # Subjective: Q{qid} Total (from save_markdown logic)
+                            elif k.endswith(" Total"):
+                                final_summary[k.replace(" Total", " 总分")] = v
+                            # Subjective Sub-questions: "17(1)", "17"
+                            # We need to detect these.
+                            elif re.match(r"\d+(\(\d+\))?", k):
+                                 # This is likely a subjective score key from sub_scores_dict
+                                 if "(" in k:
+                                     final_summary[f"Q{k} 得分"] = v
+                                 else:
+                                     # Main question total (if not handled by Q.. Total)
+                                     final_summary[f"Q{k} 总分"] = v
+                            else:
+                                final_summary[k] = v
+                        all_summaries.append(final_summary)
+            except Exception as e:
+                print(f"❌ Error processing {jf} for CSV regeneration: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Sort by Room/Seat
         def sort_key(x):
@@ -3544,7 +3593,9 @@ class App(ctk.CTk):
             except: return (999, 999)
         all_summaries.sort(key=sort_key)
         
-        if not all_summaries: return
+        if not all_summaries:
+            print(f"⚠️ Warning: No summaries generated from {len(json_files)} JSON files")
+            return
         
         # Determine Headers Order
         # 1. Basic Info
@@ -3612,7 +3663,7 @@ class App(ctk.CTk):
         grading_data_dir = self.get_folder_path('grading_data')
         if not os.path.exists(grading_data_dir): os.makedirs(grading_data_dir)
         
-        csv_filename = "Grade_Summary.csv"
+        csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
         csv_path = os.path.join(grading_data_dir, csv_filename)
         
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
