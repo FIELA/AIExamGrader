@@ -45,11 +45,12 @@ class StudentManager:
             header = [str(h).strip() for h in rows[0]]
             idx_map = {}
             for i, col_name in enumerate(header):
-                if "考号" in col_name or "学号" in col_name or "准考证号" in col_name: idx_map['id'] = i
-                elif "姓名" in col_name: idx_map['name'] = i
-                elif "班级" in col_name: idx_map['class'] = i
-                elif "考场" in col_name: idx_map['room'] = i
-                elif "座号" in col_name or "座位" in col_name: idx_map['seat'] = i
+                col_lower = col_name.lower()
+                if "考号" in col_name or "学号" in col_name or "准考证号" in col_name or "id" in col_lower: idx_map['id'] = i
+                elif "姓名" in col_name or "name" in col_lower: idx_map['name'] = i
+                elif "班级" in col_name or "class" in col_lower: idx_map['class'] = i
+                elif "考场" in col_name or "room" in col_lower: idx_map['room'] = i
+                elif "座号" in col_name or "座位" in col_name or "seat" in col_lower: idx_map['seat'] = i
 
             for row in rows[1:]:
                 s = {'id': '', 'name': '', 'class': '', 'room': '', 'seat': ''}
