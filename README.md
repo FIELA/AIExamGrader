@@ -10,37 +10,7 @@
 
 ## 📖 Introduction
 
-**AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed to transform the exam grading experience for teachers and educators worldwide.
-
-### 🎯 What is AI Exam Grader?
-
-A comprehensive solution that leverages the **visual understanding** and **reasoning capabilities** of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers, with features including:
-
-- 🤖 **Automated Grading**: Batch process hundreds of answer sheets with high accuracy
-- 📊 **Smart Data Management**: Automatic validation, intelligent recovery, and comprehensive reporting
-- 🔍 **Human-in-the-Loop**: Dedicated review interface for quality assurance
-- 🌐 **Full Internationalization**: Seamlessly supports English and Chinese workflows
-
-### 💡 Why Choose AI Exam Grader?
-
-**For Teachers**:
-- ⏱️ **Save Time**: Reduce grading time from hours to minutes
-- 📈 **Improve Accuracy**: Consistent evaluation with AI-powered analysis
-- 📋 **Detailed Reports**: Get comprehensive Markdown reports for each student
-- 🔄 **Easy Re-grading**: Update answer keys and re-grade in one click
-
-**For Institutions**:
-- 📚 **Scalable**: Handle exams with hundreds or thousands of students
-- 💾 **Data Security**: All processing can be done locally with self-hosted models
-- 📊 **Export Ready**: Generate Excel-ready CSV files for further analysis
-- 🔒 **Privacy First**: No data sent to third parties (when using private APIs)
-
-### ✨ Key Highlights
-
-- **Chain Validation**: Automatic pre-checks ensure Answer Key → Layout → CSV integrity before grading
-- **Smart Recovery**: Lost CSV? No problem! Automatically rebuilds from JSON reports
-- **Incremental Processing**: Resume grading anytime - skips already completed files
-- **Bilingual Support**: Handles both Chinese and English folder structures seamlessly
+**AI Exam Grader** is an intelligent grading assistant powered by Large Language Models (LLMs), designed for teachers and educators. It leverages the visual understanding capabilities of **OpenAI (GPT-4o)** or **Google Gemini (Pro)** to automatically grade handwritten exam papers and generate detailed reports.
 
 > [!IMPORTANT]
 > **License Notice**
@@ -86,8 +56,7 @@ A comprehensive solution that leverages the **visual understanding** and **reaso
     - Full Chinese-English support
     - Quick-switch configuration profiles
 
-> [!NOTE]
-> This application relies heavily on the model's **visual understanding** and **reasoning capabilities**. For best results, we recommend using more powerful models (e.g., GPT-4o, Gemini 2.5 Pro).
+
 
 ## 🚀 Quick Start
 
