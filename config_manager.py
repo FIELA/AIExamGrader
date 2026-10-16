@@ -6,11 +6,18 @@
 
 import json
 import os
-from typing import Dict, Any, List
+from pathlib import Path
+import sys
+from typing import Dict, Any, List, Optional
 
 class ConfigManager:
-    def __init__(self, config_path: str = "config.json"):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[str] = None):
+        if config_path is None:
+            if sys.platform == "darwin" and getattr(sys, "frozen", False):
+                config_path = str(Path.home() / "Library" / "Application Support" / "AIExamGrader" / "config.json")
+            else:
+                config_path = "config.json"
+        self.config_path = os.fspath(config_path)
         self.config: Dict[str, Any] = {}
         self.load_config()
 
@@ -31,7 +38,9 @@ class ConfigManager:
 
     def save_config(self):
         try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            Path(self.config_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_path, "w", encoding="utf-8",
+                      opener=lambda path, flags: os.open(path, flags, 0o600)) as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving config: {e}")

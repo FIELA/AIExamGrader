@@ -1,5 +1,11 @@
 # 配置文件使用指南
 
+## 配置文件位置
+
+macOS 打包版将配置固定保存在 `~/Library/Application Support/AIExamGrader/config.json`，保存时自动创建目录，移动或重新打包应用后仍使用同一份配置。新配置文件仅当前用户可读写。
+
+沿用源码版配置时，请先退出应用，再将原来的 `config.json` 复制到上述位置；已有目标配置时先备份，避免覆盖。源码运行仍使用启动工作目录中的 `config.json`，下面的快速开始步骤适用于源码运行。
+
 ## 快速开始
 
 1. 复制 `config_example.json` 为 `config.json`：

@@ -7,6 +7,7 @@
 import os
 import sys
 import threading
+import queue
 import time
 import platform
 from utils import sort_csv_headers
@@ -26,11 +27,15 @@ import customtkinter as ctk
 from tooltip import ToolTip
 from tkinter import filedialog, messagebox
 import subprocess
+import filecmp
 
 # Import new modules
 from config_manager import ConfigManager
-from student_manager import StudentManager
+from student_manager import StudentManager, name_key, same_class, student_key
+from report_files import candidate_prefixes, find_report, record_image_name, unique_filename, unique_report_prefix
+from sheet_export import NAME_PATTERNS, find_graded_sheets, plan_export
 from grader_engine import AIGraderEngine
+from rubric_loader import RubricLoader
 from translations import TRANSLATIONS
 from review_window import ReviewWindow
 from theme import Theme
@@ -39,6 +44,8 @@ from PIL import Image
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self._ui_queue = queue.Queue()
+        self.after(50, self._drain_ui_queue)
 
         # Hide main window initially
         self.withdraw()
@@ -74,10 +81,13 @@ class App(ctk.CTk):
         self.student_manager = StudentManager()
         
         self.rubric_path = ""
+        self.rubric_loader = RubricLoader()
+        self._preparing_rubric = False
         self.exam_folder = ""
         
         self.processing = False
         self.write_lock = threading.RLock()  # Use RLock for reentrant locking
+        self.rename_lock = threading.Lock()  # Picking a free image name and renaming must not interleave
         self.completed_count = 0
 
         self.total_files = 0
@@ -144,11 +154,8 @@ class App(ctk.CTk):
             splash.update_progress(95, "Finalizing...")
             splash.update()
         
-        if platform.system() == "Darwin":
-            self.apply_mac_paste_fix(self.entry_key)
-            self.apply_mac_paste_fix(self.entry_base)
-            try: self.apply_mac_paste_fix_to_widget(self.combo_model._entry)
-            except: pass
+        # Tk already provides native clipboard shortcuts on macOS.
+        # Forwarding Command-v to <<Paste>> here would paste twice.
 
         # Initialization complete
         if splash:
@@ -173,6 +180,51 @@ class App(ctk.CTk):
 
 
 
+
+    def _drain_ui_queue(self):
+        for _ in range(100):
+            try:
+                delay, callback, args = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.after(delay, callback, *args)
+        self.after(50, self._drain_ui_queue)
+
+    def ui_after(self, delay, callback, *args):
+        """Workers enqueue Python data; only the main thread enters Tcl/Tk."""
+        if threading.current_thread() is threading.main_thread():
+            return self.after(delay, callback, *args)
+        self._ui_queue.put((delay, callback, args))
+
+    def _ui_call(self, callback):
+        if threading.current_thread() is threading.main_thread():
+            return callback()
+        done = threading.Event()
+        result = []
+        def invoke():
+            try:
+                result.append((True, callback()))
+            except Exception as error:
+                result.append((False, error))
+            finally:
+                done.set()
+        self.ui_after(0, invoke)
+        if not done.wait(20):
+            raise TimeoutError("Application did not respond to the worker within 20s")
+        success, value = result[0]
+        if not success:
+            raise value
+        return value
+
+    def _create_grader(self):
+        def settings():
+            key = getattr(self, "current_api_key", None)
+            if key is None:
+                key = self.entry_key.get()
+            if not key:
+                raise ValueError("API key required")
+            return self.provider_var.get(), key, self.entry_base.get(), self.combo_model.get()
+        return AIGraderEngine(*self._ui_call(settings))
 
     def resource_path(self, relative_path):
         """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -275,33 +327,6 @@ class App(ctk.CTk):
             else:
                 self.icons[name] = None
 
-    def apply_mac_paste_fix(self, ctk_widget):
-        try:
-            if hasattr(ctk_widget, "_entry"):
-                ctk_widget._entry.bind("<Command-v>", lambda e: ctk_widget._entry.event_generate("<<Paste>>"))
-                ctk_widget._entry.bind("<Command-c>", lambda e: ctk_widget._entry.event_generate("<<Copy>>"))
-                ctk_widget._entry.bind("<Command-x>", lambda e: ctk_widget._entry.event_generate("<<Cut>>"))
-                ctk_widget._entry.bind("<Command-a>", lambda e: ctk_widget._entry.select_range(0, 'end'))
-            else:
-                ctk_widget.bind("<Command-v>", lambda e: ctk_widget.event_generate("<<Paste>>"))
-                ctk_widget.bind("<Command-c>", lambda e: ctk_widget.event_generate("<<Copy>>"))
-                ctk_widget.bind("<Command-x>", lambda e: ctk_widget.event_generate("<<Cut>>"))
-                ctk_widget.bind("<Command-a>", lambda e: ctk_widget.select_range(0, 'end'))
-        except Exception as e:
-            print(f"Error applying Mac paste fix: {e}")
-
-    def apply_mac_paste_fix_to_widget(self, widget):
-        try:
-            widget.bind("<Command-v>", lambda e: widget.event_generate("<<Paste>>"))
-            widget.bind("<Command-c>", lambda e: widget.event_generate("<<Copy>>"))
-            widget.bind("<Command-x>", lambda e: widget.event_generate("<<Cut>>"))
-            widget.bind("<Command-a>", lambda e: widget.select_range(0, 'end'))
-        except Exception as e:
-            print(f"Error applying fix to widget: {e}")
-
-        except Exception as e:
-            print(f"Error applying fix to widget: {e}")
-
     def get_folder_path(self, key):
         """
         Get the path for a specific folder type (grading_data, reports, etc.)
@@ -318,7 +343,8 @@ class App(ctk.CTk):
             'original_files': ['original_files', '原始文件'],
             'reports': ['reports', '阅卷报告'],
             'success': ['success', '成功归档'],
-            'failed': ['failed', '失败归档']
+            'failed': ['failed', '失败归档'],
+            'exported': ['exported_sheets', '导出答题卡']
         }
         
         possible_names = names_map.get(key, [key])
@@ -338,13 +364,6 @@ class App(ctk.CTk):
             folder_name = possible_names[0] # Default to EN
             
         return os.path.join(self.exam_folder, folder_name)
-
-    def paste_event_handler(self, event):
-        try:
-            clipboard = self.clipboard_get()
-            event.widget.insert("insert", clipboard)
-            return "break"
-        except Exception: return None
 
     def setup_ui(self):
         # Handle window close
@@ -589,7 +608,7 @@ class App(ctk.CTk):
         self.log(self.t("msg_config_loaded"))
 
     def save_current_config(self):
-        self.config_manager.set("api_key", self.entry_key.get().strip())
+        self.config_manager.set("api_key", getattr(self, "current_api_key", self.entry_key.get()).strip())
         self.config_manager.set("base_url", self.entry_base.get().strip())
         self.config_manager.set("language", self.current_lang)
     
@@ -837,55 +856,67 @@ class App(ctk.CTk):
             if "gpt" in current_model.lower():
                 self.combo_model.set("gemini-1.5-pro")
 
+    def _run_api_check(self, button, label, operation, on_success):
+        """Keep every Tk call on the UI thread, including result delivery."""
+        if button.cget("state") == "disabled":
+            return
+        button.configure(state="disabled", text=self.t("checking"))
+        results = queue.Queue()
+        deadline = time.monotonic() + 35
+
+        def run():
+            try:
+                results.put((True, operation()))
+            except Exception as error:
+                # Store the message now; Python clears exception variables on exit.
+                results.put((False, str(error)))
+
+        def poll():
+            try:
+                success, result = results.get_nowait()
+            except queue.Empty:
+                if time.monotonic() < deadline:
+                    self.ui_after(100, poll)
+                    return
+                success, result = False, "API check timed out (35s)."
+            button.configure(state="normal", text=self.t(label))
+            if success:
+                on_success(result)
+            else:
+                messagebox.showerror(self.t("title_error"), self.t("msg_test_failed", error=result))
+
+        threading.Thread(target=run, daemon=True).start()
+        self.ui_after(100, poll)
+
     def check_models(self):
-        # Use current_api_key if available
         api_key = getattr(self, "current_api_key", self.entry_key.get())
         if not api_key:
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
-        self.btn_get_models.configure(state="disabled", text=self.t("checking"))
-        def run_check():
-            try:
-                engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get())
-                models = engine.get_available_models()
-                self.after(0, lambda: self.update_model_list(models))
-            except Exception as e:
-                err = str(e)
-                self.after(0, lambda: messagebox.showerror(self.t("title_check_failed"), err))
-            finally:
-                self.after(0, lambda: self.btn_get_models.configure(state="normal", text=self.t("btn_get_models")))
-        threading.Thread(target=run_check, daemon=True).start()
+        provider, base_url = self.provider_var.get(), self.entry_base.get()
+
+        def operation():
+            engine = AIGraderEngine(provider, api_key, base_url)
+            return engine.get_available_models(timeout=30)
+
+        self._run_api_check(self.btn_get_models, "btn_get_models", operation, self.update_model_list)
 
     def test_connection(self):
-        """Test API connection with current settings"""
+        """Test a snapshot of current settings without accessing Tk from a worker."""
         api_key = getattr(self, "current_api_key", self.entry_key.get())
         if not api_key:
             messagebox.showerror(self.t("title_error"), self.t("msg_enter_key"))
             return
-            
-        self.btn_test_connection.configure(state="disabled", text=self.t("checking"))
-        
-        def run_test():
-            try:
-                engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
-                
-                # Simple generation test
-                if engine.provider == "OpenAI":
-                    engine.client.chat.completions.create(
-                        model=engine.model_name,
-                        messages=[{"role": "user", "content": "Hi"}],
-                        max_tokens=1
-                    )
-                elif engine.provider == "Gemini":
-                    engine.gemini_model.generate_content("Hi")
-                
-                self.after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_test_success")))
-            except Exception as e:
-                self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_test_failed", error=str(e))))
-            finally:
-                self.after(0, lambda: self.btn_test_connection.configure(state="normal", text=self.t("btn_test_connection")))
-        
-        threading.Thread(target=run_test, daemon=True).start()
+        provider, base_url, model = self.provider_var.get(), self.entry_base.get(), self.combo_model.get()
+
+        def operation():
+            engine = AIGraderEngine(provider, api_key, base_url, model)
+            engine.test_connection(timeout=30)
+
+        self._run_api_check(
+            self.btn_test_connection, "btn_test_connection", operation,
+            lambda _: messagebox.showinfo(self.t("title_success"), self.t("msg_test_success")),
+        )
 
     def update_model_list(self, models):
         if not models: return
@@ -894,6 +925,9 @@ class App(ctk.CTk):
         messagebox.showinfo(self.t("title_success"), self.t("check_success", count=len(models)))
 
     def log(self, message):
+        if threading.current_thread() is not threading.main_thread():
+            self.ui_after(0, self.log, message)
+            return
         current_time = datetime.datetime.now().strftime("%H:%M:%S")
         self.log_box.insert("end", f"[{current_time}] {message}\n")
         self.log_box.see("end")
@@ -911,12 +945,83 @@ class App(ctk.CTk):
 
     def load_rubric(self):
         default_dir = os.path.expanduser("~/Downloads")
-        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[("Text Files", "*.txt"), ("Markdown", "*.md")])
+        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[
+            ("Rubric (TXT / Markdown / PDF)", "*.txt *.md *.pdf"),
+            ("Text Files", "*.txt"), ("Markdown", "*.md"), ("PDF", "*.pdf")])
         if path:
             self.rubric_path = path
             self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
             
             self.check_ready_and_verify()
+
+    def _load_rubric_document(self, allow_conversion=True):
+        path = self.rubric_path
+        output_dir = self.get_folder_path('grading_data') if self.exam_folder else None
+
+        def convert(pdf_path):
+            self.log(self.t("log_pdf_converting"))
+            engine = self._create_grader()
+            return engine.convert_rubric_pdf(pdf_path, progress_callback=lambda page, total:
+                                           self.log(self.t("log_pdf_page", page=page, total=total)))
+
+        document = self.rubric_loader.load(path, output_dir,
+                                          convert_pdf=convert if allow_conversion else None)
+        if str(path).lower().endswith('.pdf'):
+            self.log(self.t("log_pdf_cached" if document.from_cache else "log_pdf_converted",
+                            path=str(document.path)))
+        return document
+
+    def read_rubric_text(self):
+        return self._load_rubric_document().text
+
+    def _pdf_answer_key_matches(self, json_path):
+        if not str(self.rubric_path).lower().endswith('.pdf'):
+            return True
+        try:
+            document = self._load_rubric_document(allow_conversion=False)
+            with open(os.path.splitext(json_path)[0] + '.source.json', encoding='utf-8') as handle:
+                return json.load(handle) == document.signature
+        except (OSError, ValueError):
+            return False
+
+    def _save_answer_key_source(self, json_path, document):
+        with open(os.path.splitext(json_path)[0] + '.source.json', 'w', encoding='utf-8') as handle:
+            json.dump(document.signature, handle)
+
+    def ensure_rubric_and_run(self, callback):
+        if not str(self.rubric_path).lower().endswith('.pdf'):
+            callback()
+            return
+        if self._preparing_rubric:
+            return
+        self._preparing_rubric = True
+        source, folder = self.rubric_path, self.exam_folder
+        controls = [self.btn_start, self.btn_rubric, self.btn_folder]
+        states = [control.cget('state') for control in controls]
+        for control in controls:
+            control.configure(state='disabled')
+
+        def finish(error=None):
+            self._preparing_rubric = False
+            for control, state in zip(controls, states):
+                control.configure(state=state)
+            if error is None and (source != self.rubric_path or folder != self.exam_folder):
+                error = self.t("msg_pdf_inputs_changed")
+            if error is not None:
+                self.log(self.t("msg_pdf_failed", error=error))
+                messagebox.showerror(self.t("title_error"), self.t("msg_pdf_failed", error=error))
+                return
+            callback()
+
+        def prepare():
+            try:
+                self.read_rubric_text()
+            except Exception as error:
+                self.ui_after(0, finish, str(error))
+            else:
+                self.ui_after(0, finish)
+
+        threading.Thread(target=prepare, daemon=True).start()
 
     def select_folder(self):
         default_dir = os.path.expanduser("~/Downloads/photo")
@@ -1015,7 +1120,7 @@ class App(ctk.CTk):
             checked_count += 1
             # Only log progress if running in main thread context (optional check, or just skip logging in sync mode)
             # if checked_count % 50 == 0:
-            #     self.after(0, lambda c=checked_count: self.log(self.t("log_verified_progress", current=c, total=total_images)))
+            #     self.ui_after(0, lambda c=checked_count: self.log(self.t("log_verified_progress", current=c, total=total_images)))
 
             # Check 0: If filename is in CSV, it's verified (for CSV part)
             is_in_csv = filename in csv_filenames
@@ -1162,7 +1267,7 @@ class App(ctk.CTk):
             missing_reports, missing_jsons, missing_csv, failed_files = self._verify_files_sync()
             
             # Result
-            self.after(0, lambda: self.handle_verification_result(total_images, missing_reports, missing_csv, missing_jsons, failed_files))
+            self.ui_after(0, lambda: self.handle_verification_result(total_images, missing_reports, missing_csv, missing_jsons, failed_files))
 
         threading.Thread(target=verify_task, daemon=True).start()
 
@@ -1171,7 +1276,7 @@ class App(ctk.CTk):
             self.log(self.t("msg_verification_pass"))
             
             if messagebox.askyesno(self.t("msg_grading_complete"), self.t("msg_enter_review")):
-                self.after(100, self.open_review_window)
+                self.ui_after(100, self.open_review_window)
             self.btn_review.configure(state="normal")
         else:
             msg = self.t("msg_verification_fail", total=total) + "\n"
@@ -1343,7 +1448,7 @@ class App(ctk.CTk):
             os._exit(0)
 
     def start_grading_thread(self):
-        if not self.rubric_path or not self.exam_folder:
+        if not self.rubric_path or not os.path.isfile(self.rubric_path) or not self.exam_folder or not os.path.isdir(self.exam_folder):
             messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
             return
         if not self.entry_key.get():
@@ -1355,8 +1460,9 @@ class App(ctk.CTk):
         self.log(self.t("log_checking_answer_key"))
         
         # Check and generate answer key if needed (BEFORE grading)
-        # Chain: Answer Key -> Layout -> CSV -> Grading
-        self.ensure_answer_key_and_run(lambda: self.ensure_layout_and_run(lambda: self.ensure_csv_and_run(self._run_grading_process)))
+        # Chain: PDF conversion -> Answer Key -> Layout -> CSV -> Grading
+        self.ensure_rubric_and_run(lambda: self.ensure_answer_key_and_run(
+            lambda: self.ensure_layout_and_run(lambda: self.ensure_csv_and_run(self._run_grading_process))))
     
     def ensure_answer_key_and_run(self, callback):
         """Ensure answer key exists before running callback"""
@@ -1373,7 +1479,7 @@ class App(ctk.CTk):
             if not os.path.exists(json_path) and os.path.exists(legacy_path):
                 json_path = legacy_path
                 
-            if os.path.exists(json_path):
+            if os.path.exists(json_path) and self._pdf_answer_key_matches(json_path):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         self.answer_key = json.load(f)
@@ -1388,8 +1494,8 @@ class App(ctk.CTk):
     
         # No answer key found, need to extract
         self.log(self.t("log_no_answer_key"))
-        if not self.rubric_path:
-            messagebox.showerror(self.t("title_error"), "Cannot generate answer key: no rubric loaded.")
+        if not self.rubric_path or not os.path.isfile(self.rubric_path):
+            messagebox.showerror(self.t("title_error"), "Cannot generate answer key: select an existing rubric file.")
             return
         
         # Extract in background, then run callback after confirmation
@@ -1398,27 +1504,24 @@ class App(ctk.CTk):
     def extract_answer_key_for_grading(self, callback):
         """Extract answer key and then run callback after user confirms"""
         try:
-            with open(self.rubric_path, 'r', encoding='utf-8') as f:
-                rubric_text = f.read()
+            rubric_document = self._load_rubric_document()
+            rubric_text = rubric_document.text
             
-            api_key = getattr(self, "current_api_key", self.entry_key.get())
-            if not api_key: 
-                self.after(0, lambda: messagebox.showerror(self.t("title_error"), "API key required"))
-                return
-            
-            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
-            
-            self.after(0, lambda: self.log(self.t("log_request_sent_rocket")))
+            engine = self._create_grader()
+
+            self.ui_after(0, lambda: self.log(self.t("log_request_sent_rocket")))
             
             # Use Concurrent Extraction & Consolidation (with detailed logging)
-            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
+            raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=lambda msg: self.ui_after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
     
             
-            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.after(0, lambda m=msg: self.log(m)), t_func=self.t)
+            final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=lambda msg: self.ui_after(0, lambda m=msg: self.log(m)), t_func=self.t)
             
+            if not final_key:
+                raise ValueError("No standard answers generated; grading stopped.")
             count = len(final_key)
-            self.after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
+            self.ui_after(0, lambda: self.log(self.t("log_answers_extracted", count=count)))
             
             # Show Review Dialog
             json_path = None
@@ -1433,8 +1536,11 @@ class App(ctk.CTk):
                 # Save to JSON
                 if json_path:
                     try:
+                        if self._load_rubric_document(allow_conversion=False).signature != rubric_document.signature:
+                            raise ValueError(self.t("msg_rubric_changed"))
                         with open(json_path, 'w', encoding='utf-8') as f:
                             json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                        self._save_answer_key_source(json_path, rubric_document)
                         self.log(self.t("log_answer_key_confirmed_generated"))
                         
                         # Trigger CSV generation immediately -> REMOVED
@@ -1443,16 +1549,18 @@ class App(ctk.CTk):
                         
                     except Exception as e:
                         self.log(f"Failed to save answer key: {e}")
+                        messagebox.showerror(self.t("title_error"), str(e))
+                        return
                 
                 # Now run the grading process
                 callback()
             
-            self.after(0, lambda: self.log(self.t("log_waiting_confirmation")))
-            self.after(0, lambda: self.show_standard_answer_dialog_with_callback(final_key, report, json_path, on_confirm_and_run))
+            self.ui_after(0, lambda: self.log(self.t("log_waiting_confirmation")))
+            self.ui_after(0, lambda: self.show_standard_answer_dialog_with_callback(final_key, report, json_path, on_confirm_and_run))
             
         except Exception as e:
-            self.after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
-            self.after(0, lambda: messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {e}"))
+            self.ui_after(0, lambda e=e: self.log(f"Failed to extract answer key: {e}"))
+            self.ui_after(0, lambda error=str(e): messagebox.showerror(self.t("title_error"), f"Answer key extraction failed: {error}"))
 
     def ensure_csv_and_run(self, callback):
         """Ensure CSV exists before running callback"""
@@ -1531,11 +1639,11 @@ class App(ctk.CTk):
         # 1. Basic Info
         if is_en:
             headers = ['Room', 'Seat', 'Class', 'Name', 'ID']
-            headers += ['Consistency', 'Matches', 'Review Status', 'Absence Marker', 'Confirm Absence']
+            headers += ['Consistency', 'Matches', 'Match Method', 'Review Status', 'Absence Marker', 'Confirm Absence']
             headers += ['Total Score', 'Objective Total', 'Subjective Total']
         else:
             headers = ['考场', '座号', '班级', '姓名', '考号']
-            headers += ['信息一致性', '匹配项数', '复审状态', '缺考标记', '确认缺考']
+            headers += ['信息一致性', '匹配项数', '匹配方式', '复审状态', '缺考标记', '确认缺考']
             headers += ['总分', '客观题', '主观题']
             
         # 4. Subjective Questions
@@ -1699,8 +1807,8 @@ class App(ctk.CTk):
             files = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
             
             if not files: # Changed from self.image_files to files as per original context
-                self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_no_images")))
-                self.after(0, lambda: self.reset_ui_state())
+                self.ui_after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_no_images")))
+                self.ui_after(0, lambda: self.reset_ui_state())
                 return
                 
             import random
@@ -1709,8 +1817,7 @@ class App(ctk.CTk):
             sample_files = random.sample(files, sample_count)
             
             # 2. Detect concurrently
-            api_key = getattr(self, "current_api_key", self.entry_key.get())
-            grader = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            grader = self._create_grader()
             
             # Submit all detection tasks concurrently with 1 second stagger
             futures = []
@@ -1719,7 +1826,7 @@ class App(ctk.CTk):
             try:
                 for i, fname in enumerate(sample_files):
                     # Log with filename
-                    self.after(0, lambda i=i, fn=fname, sc=sample_count: self.log(self.t("msg_detecting", current=i+1, total=sc) + f" - {fn}"))
+                    self.ui_after(0, lambda i=i, fn=fname, sc=sample_count: self.log(self.t("msg_detecting", current=i+1, total=sc) + f" - {fn}"))
                     
                     path = os.path.join(self.exam_folder, fname)
                     future = executor.submit(grader.detect_regions, path)
@@ -1727,7 +1834,7 @@ class App(ctk.CTk):
                     futures.append(future)
                     
                     # Log Request Sent
-                    self.after(0, lambda i=i: self.log(self.t("log_layout_req_sent", index=i+1)))
+                    self.ui_after(0, lambda i=i: self.log(self.t("log_layout_req_sent", index=i+1)))
                     
                     # Stagger by 1 second between starts
                     if i < len(sample_files) - 1:
@@ -1741,29 +1848,33 @@ class App(ctk.CTk):
                         desc = future.result()
                         descriptions.append(desc)
                         # Log Request Received
-                        self.after(0, lambda idx=idx: self.log(self.t("log_layout_req_received", index=idx)))
+                        self.ui_after(0, lambda idx=idx: self.log(self.t("log_layout_req_received", index=idx)))
                     except Exception as e:
                         self.log(f"Request {idx} failed: {e}")
             finally:
                 executor.shutdown(wait=True)
             
             # 3. Consolidate
-            self.after(0, lambda: self.log(self.t("log_layout_req_all_received", count=len(descriptions))))
-            self.after(0, lambda: self.log(self.t("log_consolidating_layout")))
-            self.after(0, lambda: self.log(self.t("log_consolidation_sent")))
+            self.ui_after(0, lambda: self.log(self.t("log_layout_req_all_received", count=len(descriptions))))
+            self.ui_after(0, lambda: self.log(self.t("log_consolidating_layout")))
+            self.ui_after(0, lambda: self.log(self.t("log_consolidation_sent")))
             
-            self.after(0, lambda: self.log(self.t("msg_consolidating")))
+            self.ui_after(0, lambda: self.log(self.t("msg_consolidating")))
+            if len(descriptions) != sample_count:
+                raise ValueError("Layout analysis failed; grading stopped.")
             final_layout = grader.consolidate_layout(descriptions)
+            if not final_layout:
+                raise ValueError("Empty layout; grading stopped.")
             
-            self.after(0, lambda: self.log(self.t("log_consolidation_received")))
+            self.ui_after(0, lambda: self.log(self.t("log_consolidation_received")))
             
             # 4. Show Confirmation (on main thread)
-            self.after(0, lambda: self.log(self.t("log_waiting_confirmation")))
-            self.after(0, lambda: self.show_confirmation_dialog(final_layout, callback))
+            self.ui_after(0, lambda: self.log(self.t("log_waiting_confirmation")))
+            self.ui_after(0, lambda: self.show_confirmation_dialog(final_layout, callback))
             
         except Exception as e:
-            self.after(0, lambda: self.log(self.t("msg_detect_failed", error=str(e))))
-            self.after(0, lambda: self.reset_ui_state())
+            self.ui_after(0, lambda error=str(e): self.log(self.t("msg_detect_failed", error=error)))
+            self.ui_after(0, lambda: self.reset_ui_state())
 
     def show_confirmation_dialog(self, layout_description, callback):
         def on_confirm(new_desc):
@@ -1771,7 +1882,7 @@ class App(ctk.CTk):
             self.template_confirmed = True
             self.save_layout_config()
             self.log(self.t("log_layout_confirmed_generated"))
-            self.after(100, callback) # Run callback
+            self.ui_after(100, callback) # Run callback
             
         TemplateConfirmDialog(self, layout_description, on_confirm)
 
@@ -1842,7 +1953,7 @@ class App(ctk.CTk):
         # Header Mappings
         header_map = {
             '考场': 'Room', '座号': 'Seat', '班级': 'Class', '姓名': 'Name', '考号': 'ID',
-            '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches',
+            '总分': 'Total Score', '信息一致性': 'Consistency', '匹配项数': 'Matches', '匹配方式': 'Match Method',
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
             '原始文件': 'Original File', '重命名文件': 'Renamed File', '客观题': 'Objective Score',
@@ -1899,8 +2010,8 @@ class App(ctk.CTk):
             fixed_order = [
                 'Room', 'Seat', 'Class', 'Name', 'ID',
                 '考场', '座号', '班级', '姓名', '考号',
-                'Consistency', 'Matches', 'Review Status', 'Absence Marker', 'Confirm Absence',
-                '信息一致性', '匹配项数', '复审状态', '缺考标记', '确认缺考',
+                'Consistency', 'Matches', 'Match Method', 'Review Status', 'Absence Marker', 'Confirm Absence',
+                '信息一致性', '匹配项数', '匹配方式', '复审状态', '缺考标记', '确认缺考',
                 'Total Score', 'Objective Total', 'Subjective Total',
                 '总分', '客观题', '主观题'
             ]
@@ -1994,10 +2105,10 @@ class App(ctk.CTk):
                             writer.writerows(all_rows)
                     
                     writer.writerow(final_data)
-                self.after(0, lambda fn=csv_filename: self.log(self.t("log_csv_written", filename=fn)))
+                self.ui_after(0, lambda fn=csv_filename: self.log(self.t("log_csv_written", filename=fn)))
             except Exception as e:
                 err = str(e)
-                self.after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
+                self.ui_after(0, lambda e=err: self.log(self.t("log_csv_write_failed", error=e)))
 
     def regenerate_summary_csv(self, target_path=None):
         """Regenerate the entire summary CSV from report JSONs"""
@@ -2095,6 +2206,7 @@ class App(ctk.CTk):
                     '总分': total_score,
                     '信息一致性': consistency_note,
                     '匹配项数': matches,
+                    '匹配方式': self.match_label(data),
                     'OCR姓名': data.get('ocr_name', ''),
                     'OCR班级': data.get('ocr_class', ''),
                     'OCR考场': data.get('ocr_room', ''),
@@ -2108,7 +2220,7 @@ class App(ctk.CTk):
                     '客观题总数': obj_total,
                     '主观题': subj_score_sum,
                     '复审状态': review_status,
-                    '缺考标记': '是' if data.get('absent', False) else '',
+                    '缺考标记': '是' if self.is_absent_record(data) else '',
                     '确认缺考': confirm_absence_display
                 }
 
@@ -2158,6 +2270,21 @@ class App(ctk.CTk):
             except Exception as e:
                 print(f"Error processing {jf} for CSV: {e}")
 
+    def match_label(self, data):
+        """How the sheet's student was found, in the current language ('' for reports from before match records)."""
+        method = (data.get('student_match') or {}).get('method')
+        return self.t(f"match_{method}") if method else ''
+
+    @staticmethod
+    def is_absent_record(data):
+        """Absent if the scan was named with 缺 or the sheet scored zero."""
+        if (data.get('db_student_info') or {}).get('is_absent'):
+            return True
+        try:
+            return float(data.get('total_score') or 0) == 0
+        except (TypeError, ValueError):
+            return False
+
     def generate_report_content(self, data, db_student_info):
         student_name = db_student_info.get('name', '未知')
         student_id = db_student_info.get('id', '未知')
@@ -2181,6 +2308,11 @@ class App(ctk.CTk):
         
         def check_match(field_name, ocr_val, db_val):
             if ocr_val and db_val != '未知':
+                # Names ignore spacing; classes accept 701 / 7(1)班 / 七年级一班
+                if field_name == "姓名":
+                    return bool(name_key(ocr_val)) and name_key(ocr_val) == name_key(db_val)
+                if field_name == "班级":
+                    return same_class(ocr_val, db_val)
                 s_ocr = str(ocr_val).strip()
                 s_db = str(db_val).strip()
                 if s_ocr.isdigit() and s_db.isdigit():
@@ -2242,13 +2374,18 @@ class App(ctk.CTk):
 
         md = ""
         is_english = (self.current_lang == "EN")
-        
+        match_text = self.match_label(data)
+        candidates = " / ".join(f"{c.get('name', '')}({c.get('class', '')})" for c in (data.get('student_match') or {}).get('candidates', []))
+
         # Report header - bilingual
         if is_english:
             md += f"# 📝 Grading Report\n\n"
             md += f"- **Basic Info**: Class {class_no} | {student_name} | {student_id}\n"
             md += f"- **Exam Seat**: Room {exam_room}, Seat {seat_no}\n"
             md += f"- **Info Check**: {consistency_note} (Matches: {matches})\n"
+            if match_text:
+                md += f"- **Student Match**: {match_text}\n"
+                if candidates: md += f"  - Candidates: {candidates}\n"
             md += f"- **OCR Recognition**:\n"
             md += f"  - Name: {ocr_name}\n"
             md += f"  - Class: {ocr_class}\n"
@@ -2261,6 +2398,9 @@ class App(ctk.CTk):
             md += f"- **基本信息**: {class_no}班 | {student_name} | {student_id}\n"
             md += f"- **考场座位**: {exam_room}考场 {seat_no}号\n"
             md += f"- **信息校验**: {consistency_note} (匹配项数: {matches})\n"
+            if match_text:
+                md += f"- **学生匹配**: {match_text}\n"
+                if candidates: md += f"  - 候选: {candidates}\n"
             md += f"- **OCR识别**:\n"
             md += f"  - 姓名: {ocr_name}\n"
             md += f"  - 班级: {ocr_class}\n"
@@ -2437,7 +2577,7 @@ class App(ctk.CTk):
         if self.exam_folder:
             grading_data_dir = self.get_folder_path('grading_data')
             json_path = os.path.join(grading_data_dir, "answer_key.json")
-            if os.path.exists(json_path):
+            if os.path.exists(json_path) and self._pdf_answer_key_matches(json_path):
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         self.answer_key = json.load(f)
@@ -2448,27 +2588,26 @@ class App(ctk.CTk):
         
         # 2. Extract from Rubric (if no JSON or load failed)
         try:
-            with open(self.rubric_path, 'r', encoding='utf-8') as f:
-                rubric_text = f.read()
+            rubric_document = self._load_rubric_document()
+            rubric_text = rubric_document.text
             
             self.log(self.t("log_extracting_answers"))
             
-            api_key = getattr(self, "current_api_key", self.entry_key.get())
-            if not api_key: return
-            
-            engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            engine = self._create_grader()
             
             # Use Concurrent Extraction & Consolidation
-            log_cb = lambda msg: self.after(0, lambda m=msg: self.log(m))
+            log_cb = lambda msg: self.ui_after(0, lambda m=msg: self.log(m))
             raw_results = engine.extract_answer_key_concurrent(rubric_text, log_callback=log_cb, t_func=self.t)
             final_key, report = engine.consolidate_answer_keys(raw_results, log_callback=log_cb, t_func=self.t)
             
+            if not final_key:
+                raise ValueError("No standard answers generated; grading stopped.")
             count = len(final_key)
             self.log(self.t("log_answers_extracted", count=count))
             
             # 3. Show Review Dialog (on Main Thread)
             # We pass a callback to handle the saving after user confirms
-            self.after(0, lambda: self.show_standard_answer_dialog(final_key, report, json_path))
+            self.ui_after(0, lambda: self.show_standard_answer_dialog(final_key, report, json_path))
             
         except Exception as e:
             self.log(f"Failed to extract answer key: {e}")
@@ -2489,8 +2628,11 @@ class App(ctk.CTk):
             # Save to JSON
             if actual_save_path:
                 try:
+                    if self._load_rubric_document(allow_conversion=False).signature != rubric_document.signature:
+                        raise ValueError(self.t("msg_rubric_changed"))
                     with open(actual_save_path, 'w', encoding='utf-8') as f:
                         json.dump(self.answer_key, f, ensure_ascii=False, indent=2)
+                    self._save_answer_key_source(actual_save_path, rubric_document)
                     self.log(self.t("log_answer_key_saved"))
                 except Exception as e:
                     self.log(f"Failed to save answer key: {e}")
@@ -2579,12 +2721,12 @@ class App(ctk.CTk):
         """
         reports_dir = self.get_folder_path('reports')
         if not os.path.exists(reports_dir):
-            self.after(0, lambda: messagebox.showerror(self.t("title_error"), "Reports directory not found."))
+            self.ui_after(0, lambda: messagebox.showerror(self.t("title_error"), "Reports directory not found."))
             return
         
         json_files = [f for f in os.listdir(reports_dir) if f.endswith('.json')]
         total = len(json_files)
-        self.after(0, lambda: self.log(self.t("log_found_student_records", count=total)))
+        self.ui_after(0, lambda: self.log(self.t("log_found_student_records", count=total)))
         
         updated_count = 0
         
@@ -2655,52 +2797,50 @@ class App(ctk.CTk):
                     updated_count += 1
                 
             except Exception as e:
-                self.after(0, lambda e=e, f=json_file: self.log(f"❌ Error processing {f}: {e}"))
+                self.ui_after(0, lambda e=e, f=json_file: self.log(f"❌ Error processing {f}: {e}"))
         
         # Update CSV
         # Update CSV (Regenerate to ensure consistency)
-        self.after(0, lambda: self.log(self.t("log_updating_summary_csv")))
-        self.after(0, self.regenerate_summary_csv)
+        self.ui_after(0, lambda: self.log(self.t("log_updating_summary_csv")))
+        self.ui_after(0, self.regenerate_summary_csv)
         
         # Done
-        self.after(0, lambda u=updated_count, t=total: self.log(self.t("log_batch_regrade_complete", updated=u, total=t)))
-        self.after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
+        self.ui_after(0, lambda u=updated_count, t=total: self.log(self.t("log_batch_regrade_complete", updated=u, total=t)))
+        self.ui_after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
 
 
-    def save_markdown(self, data, original_filename, db_student_info, renamed_filename=None):
+    def save_markdown(self, data, original_filename, db_student_info, renamed_filename=None, report_prefix=None):
         exam_room = str(db_student_info.get('room', '未知'))
         seat_no = str(db_student_info.get('seat', '未知'))
-        
-        # Determine Filename Prefix
-        # Priority: 1. Room-Seat (if valid) -> 2. OCR Filled ID -> 3. OCR Written ID -> 4. Original Filename
-        if exam_room != '未知' and seat_no != '未知' and exam_room and seat_no:
-            filename_prefix = f"{exam_room}-{seat_no}"
-        else:
-            # Fallback to OCR
-            ocr_filled = str(data.get('ocr_id_filled', '')).strip()
-            ocr_written = str(data.get('ocr_id_written', '')).strip()
-            
-            if ocr_filled and ocr_filled.lower() != 'none':
-                filename_prefix = ocr_filled
-            elif ocr_written and ocr_written.lower() != 'none':
-                filename_prefix = ocr_written
-            else:
-                # Fallback to renamed filename if available, otherwise original
-                if renamed_filename:
-                    filename_prefix = os.path.splitext(renamed_filename)[0]
-                else:
-                    filename_prefix = os.path.splitext(original_filename)[0]
-            
-            # Log the fallback
-            self.log(f"⚠️ Filename Fallback: {original_filename} -> {filename_prefix} (Room/Seat missing)")
-        
-        # Generate Content
-        md_content, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_student_info)
-        
+        image_name = renamed_filename or original_filename
+
         reports_dir = self.get_folder_path('reports')
         if not os.path.exists(reports_dir):
             os.makedirs(reports_dir)
-            
+
+        # Determine Filename Prefix
+        # Priority: 1. Report this sheet already has -> 2. Room-Seat (if valid) -> 3. Image filename (renamed, else original)
+        # An image renamed after its OCR exam number already carries that number in its name.
+        if report_prefix:
+            filename_prefix = report_prefix
+        else:
+            if exam_room != '未知' and seat_no != '未知' and exam_room and seat_no:
+                filename_prefix = f"{exam_room}-{seat_no}"
+            else:
+                filename_prefix = os.path.splitext(os.path.basename(image_name))[0]
+
+                # Log the fallback
+                self.log(f"⚠️ Filename Fallback: {original_filename} -> {filename_prefix} (Room/Seat missing)")
+
+            # Never overwrite the report of a different answer sheet
+            free_prefix = unique_report_prefix(reports_dir, filename_prefix, image_name)
+            if free_prefix != filename_prefix:
+                self.log(self.t("log_report_name_taken", name=filename_prefix, filename=image_name, new=free_prefix))
+                filename_prefix = free_prefix
+
+        # Generate Content
+        md_content, sub_scores_dict, consistency_note, matches, obj_score_sum = self.generate_report_content(data, db_student_info)
+
         # Save Markdown
         save_path = os.path.join(reports_dir, f"{filename_prefix}.md")
         with open(save_path, "w", encoding="utf-8") as f:
@@ -2761,7 +2901,8 @@ class App(ctk.CTk):
             'OCR手写考号': data.get('ocr_id_written', ''), 'OCR填涂考号': data.get('ocr_id_filled', ''),
             '原始文件': original_filename,
             '重命名文件': renamed_filename if renamed_filename else '',
-            '信息一致性': consistency_note
+            '信息一致性': consistency_note,
+            '匹配方式': self.match_label(data)
         }
         summary_data.update(sub_scores_dict)
 
@@ -2824,7 +2965,11 @@ class App(ctk.CTk):
                 return False, str(e)
 
         try:
-            with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
+            rubric_text = self.read_rubric_text()
+            if str(self.rubric_path).lower().endswith('.pdf'):
+                key_path = os.path.join(self.get_folder_path('grading_data'), 'answer_key.json')
+                if not self._pdf_answer_key_matches(key_path):
+                    raise ValueError(self.t("msg_pdf_answers_stale"))
             
             # 1. Process Image
             result = self.grader_engine.grade_exam(rubric_text, image_path, self.layout_description)
@@ -2835,11 +2980,31 @@ class App(ctk.CTk):
                 
             # 2. Resolve Student Info
             filename = os.path.basename(image_path)
-            student_info, is_absent = self.student_manager.get_student_by_filename(filename)
-            student_info['is_absent'] = is_absent
-            
+            student_info, result['student_match'] = self.student_manager.resolve_student(filename, result)
+
+            # Keep this sheet's own report, file names and any student chosen for it in review
+            original_filename, renamed_filename, report_prefix = filename, None, None
+            reports_dir = self.get_folder_path('reports')
+            report_path = find_report(reports_dir, filename, candidate_prefixes(student_info, filename))
+            if report_path:
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    previous = json.load(f)
+                report_prefix = os.path.splitext(os.path.basename(report_path))[0]
+                original_filename = os.path.basename(previous.get('original_filename') or filename)
+                renamed_filename = previous.get('renamed_filename') or None
+                bound = previous.get('db_student_info') or {}
+                previous_match = previous.get('student_match')
+                # Reports from before match records keep any known student, as it may have been chosen in review
+                chosen = previous_match.get('method') == 'manual' if previous_match else bound.get('name') not in (None, '', '未知')
+                if chosen and student_key(bound) != student_key(student_info):
+                    student_info = dict(bound)
+                    result['student_match'] = previous_match or {'method': 'manual', 'candidates': []}
+
+            # The 缺 (absent) mark is part of the name the sheet was scanned with
+            student_info['is_absent'] = any(StudentManager.parse_room_seat(n)[2] for n in (filename, original_filename))
+
             # 3. Save Report (Overwrites existing)
-            self.save_markdown(result, filename, student_info)
+            self.save_markdown(result, original_filename, student_info, renamed_filename, report_prefix=report_prefix)
             
             self.log(self.t("log_regrade_complete", filename=filename))
             
@@ -2874,7 +3039,7 @@ class App(ctk.CTk):
             self.log(self.t("msg_verification_pass"))
             
             if messagebox.askyesno(self.t("msg_grading_complete"), self.t("msg_enter_review")):
-                self.after(100, self.open_review_window)
+                self.ui_after(100, self.open_review_window)
         else:
             msg = self.t("msg_verification_fail", total=total) + "\n"
             
@@ -2962,6 +3127,10 @@ class App(ctk.CTk):
                 except: pass
 
     def start_targeted_grading(self, target_files):
+        self.ensure_rubric_and_run(lambda: self.ensure_answer_key_and_run(
+            lambda: self._start_targeted_grading(target_files)))
+
+    def _start_targeted_grading(self, target_files):
         # If target_files is None, it means we want to auto-detect missing files (Resume Mode)
 
         
@@ -2983,6 +3152,50 @@ class App(ctk.CTk):
         # If target_files is None, process_images(None) will scan for pending files.
         threading.Thread(target=self.process_images, args=(target_files,), daemon=True).start()
 
+    def _image_folders(self, folder=None):
+        """Folders whose images must not share a name: the exam folder, success, failed and the one being processed."""
+        folders = [folder, self.exam_folder, self.get_folder_path('success'), self.get_folder_path('failed')]
+        return list(dict.fromkeys(f for f in folders if f))
+
+    def _rename_new_arrivals(self, files):
+        """Rename exam-folder images that share a name with a different sheet already processed or backed up."""
+        processed_dirs = [self.get_folder_path(key) for key in ('success', 'failed', 'original_files')]
+        result = []
+        for f in files:
+            src = os.path.join(self.exam_folder, f)
+            same_named = [os.path.join(d, f) for d in processed_dirs if os.path.isfile(os.path.join(d, f))]
+            if same_named and not any(filecmp.cmp(src, p) for p in same_named):
+                try:
+                    with self.rename_lock:
+                        new_name = unique_filename(f, [self.exam_folder] + processed_dirs)
+                        os.rename(src, os.path.join(self.exam_folder, new_name))
+                    self.ui_after(0, lambda o=f, n=new_name: self.log(self.t("log_renamed_name_clash", old=o, new=n)))
+                    f = new_name
+                except Exception as e:
+                    self.ui_after(0, lambda fn=f, e=str(e): self.log(self.t("log_processing_error", filename=fn, error=f"Rename failed: {e}")))
+            result.append(f)
+        return result
+
+    def log_student_matches(self):
+        """After a batch: how many sheets need their student checked, students on several sheets, roster students without one."""
+        reports_dir = self.get_folder_path('reports')
+        if not self.student_manager.students or not reports_dir or not os.path.isdir(reports_dir):
+            return
+        records = []
+        for name in sorted(os.listdir(reports_dir)):
+            if name.endswith('.json'):
+                try:
+                    with open(os.path.join(reports_dir, name), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                records.append((record_image_name(data) or name, data.get('db_student_info') or {}, (data.get('student_match') or {}).get('method')))
+        to_check, several, without_sheet = self.student_manager.match_summary(records)
+        self.ui_after(0, lambda: self.log(self.t("log_match_summary", matched=len(records) - len(to_check), review=len(to_check), missing=len(without_sheet))))
+        for key, images in several.items():
+            student = f"{key[0]}({key[1]})"
+            self.ui_after(0, lambda s=student, i="、".join(images): self.log(self.t("log_match_several", student=s, files=i)))
+
     def process_single_file(self, grader, rubric_text, filename, folder, is_retry, file_num=None):
         # Capture original filename before any renaming
         original_filename_before_rename = filename
@@ -2998,7 +3211,7 @@ class App(ctk.CTk):
             with self.write_lock:
                 file_num = self.completed_count + 1
         
-        self.after(0, lambda fn=filename, num=file_num: self.log(self.t("log_processing_progress", current=num, total=self.total_files, filename=fn)))
+        self.ui_after(0, lambda fn=filename, num=file_num: self.log(self.t("log_processing_progress", current=num, total=self.total_files, filename=fn)))
         
         try:
             # Check stop event again before actual grading
@@ -3006,17 +3219,17 @@ class App(ctk.CTk):
                 return False
                 
             # Log API Request
-            self.after(0, lambda fn=filename: self.log(self.t("log_api_sent", filename=fn)))
+            self.ui_after(0, lambda fn=filename: self.log(self.t("log_api_sent", filename=fn)))
 
             # Pass layout_description if available
             result = grader.grade_exam(rubric_text, image_path, self.layout_description)
             
             # Log API Response
-            self.after(0, lambda fn=filename: self.log(self.t("log_api_received", filename=fn)))
+            self.ui_after(0, lambda fn=filename: self.log(self.t("log_api_received", filename=fn)))
 
             if 'error' in result:
                 err_msg = result['error']
-                self.after(0, lambda fn=filename, e=err_msg: self.log(self.t("log_processing_error", filename=fn, error=e)))
+                self.ui_after(0, lambda fn=filename, e=err_msg: self.log(self.t("log_processing_error", filename=fn, error=e)))
                 if not is_retry:
                     # Move to failed folder
                     failed_dir = self.get_folder_path('failed')
@@ -3026,10 +3239,9 @@ class App(ctk.CTk):
             
             
             # --- Renaming Logic ---
-            # Check if filename matches standard patterns: Room-Seat (d-d) ONLY
-            import re
-            is_standard = re.match(r"^\d+-\d+$", os.path.splitext(filename)[0])
-            
+            # Files already named Room-Seat (optionally marked 缺) keep their name
+            is_standard = bool(StudentManager.parse_room_seat(filename)[0])
+
             if not is_standard:
                 # Try to extract ID from OCR
                 ocr_filled = str(result.get('ocr_id_filled', '')).strip()
@@ -3043,30 +3255,29 @@ class App(ctk.CTk):
                 
                 if new_name_base:
                     ext = os.path.splitext(filename)[1]
-                    new_filename = f"{new_name_base}{ext}"
-                    
-                    # Avoid collision
-                    if new_filename != filename:
-                        dest_path = os.path.join(folder, new_filename)
-                        counter = 1
-                        while os.path.exists(dest_path):
-                            new_filename = f"{new_name_base}_{counter}{ext}"
+
+                    # Avoid collision with any sheet in this folder or already moved to success/failed;
+                    # parallel workers can read the same exam number, so choose and rename under one lock
+                    with self.rename_lock:
+                        new_filename = unique_filename(f"{new_name_base}{ext}", self._image_folders(folder), image_path)
+                        if new_filename != filename:
                             dest_path = os.path.join(folder, new_filename)
-                            counter += 1
-                        
-                        try:
-                            os.rename(image_path, dest_path)
-                            self.after(0, lambda o=filename, n=new_filename: self.log(self.t("log_renamed_file", old=o, new=n)))
-                            
-                            # Update variables
-                            filename = new_filename
-                            image_path = dest_path
-                        except Exception as e:
-                            self.after(0, lambda e=str(e): self.log(self.t("log_processing_error", filename=filename, error=f"Rename failed: {e}")))
+                            try:
+                                os.rename(image_path, dest_path)
+                                self.ui_after(0, lambda o=filename, n=new_filename: self.log(self.t("log_renamed_file", old=o, new=n)))
+
+                                # Update variables
+                                filename = new_filename
+                                image_path = dest_path
+                            except Exception as e:
+                                self.ui_after(0, lambda e=str(e): self.log(self.t("log_processing_error", filename=filename, error=f"Rename failed: {e}")))
 
             # Resolve Student Info (Re-resolve with potentially new filename)
-            student_info, _ = self.student_manager.get_student_by_filename(filename)
-            
+            # Roster lookup by file name, exam number, written seat or handwritten class + name
+            student_info, result['student_match'] = self.student_manager.resolve_student(filename, result)
+            # The 缺 (absent) mark is part of the name the sheet was scanned with
+            student_info['is_absent'] = StudentManager.parse_room_seat(original_filename_before_rename)[2]
+
             # Save Report
             with self.write_lock:
                 # Use original_filename_before_rename for the record
@@ -3074,8 +3285,8 @@ class App(ctk.CTk):
                 self.save_markdown(result, original_filename_before_rename, student_info, renamed_file)
                 
                 # Log Saved Status
-                self.after(0, lambda fn=filename: self.log(self.t("log_json_saved", filename=fn)))
-                self.after(0, lambda fn=filename: self.log(self.t("log_report_saved", filename=fn)))
+                self.ui_after(0, lambda fn=filename: self.log(self.t("log_json_saved", filename=fn)))
+                self.ui_after(0, lambda fn=filename: self.log(self.t("log_report_saved", filename=fn)))
                 
                 # Increment counters AFTER successful completion (within lock)
                 self.completed_count += 1
@@ -3095,16 +3306,16 @@ class App(ctk.CTk):
 
             if is_retry:
 
-                self.after(0, lambda fn=filename: self.log(self.t("log_moved_back", filename=fn))) # Message might need update "Processed successfully"
+                self.ui_after(0, lambda fn=filename: self.log(self.t("log_moved_back", filename=fn))) # Message might need update "Processed successfully"
             
             # Update UI and log (outside lock)
-            self.after(0, lambda: self.update_progress_ui())
-            self.after(0, lambda fn=filename: self.log(self.t("log_file_done", filename=fn)))
+            self.ui_after(0, lambda: self.update_progress_ui())
+            self.ui_after(0, lambda fn=filename: self.log(self.t("log_file_done", filename=fn)))
             return True
             
         except Exception as e:
             err_str = str(e)
-            self.after(0, lambda fn=filename, e=err_str: self.log(self.t("log_processing_error", filename=fn, error=e)))
+            self.ui_after(0, lambda fn=filename, e=err_str: self.log(self.t("log_processing_error", filename=fn, error=e)))
             if not is_retry:
                 failed_dir = self.get_folder_path('failed')
                 if not os.path.exists(failed_dir): os.makedirs(failed_dir)
@@ -3114,22 +3325,9 @@ class App(ctk.CTk):
 
     def process_images(self, target_files=None):
         try:
-            with open(self.rubric_path, "r", encoding="utf-8") as f: rubric_text = f.read()
+            rubric_text = self.read_rubric_text()
             
-            # Use current_api_key if available (handles masking), else fallback to entry
-            api_key = getattr(self, "current_api_key", self.entry_key.get())
-            # Double check: if api_key is masked (starts with sk- and has ...), try to get from entry if entry is not masked?
-
-            # If entry has real key (user typed it but didn't trigger focus out?), use entry.
-            entry_val = self.entry_key.get()
-            if not api_key.startswith("sk-") or "..." not in api_key:
-                 # api_key seems valid or at least not obviously masked
-                 pass
-            elif entry_val and not entry_val.startswith("sk-") or "..." not in entry_val:
-                 # Entry has unmasked key, use it
-                 api_key = entry_val
-            
-            grader = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+            grader = self._create_grader()
             valid_extensions = ('.png', '.jpg', '.jpeg')
             
             # ===== PHASE 1: Main Folder Processing =====
@@ -3141,7 +3339,11 @@ class App(ctk.CTk):
             success_files = []
             if os.path.exists(success_dir):
                 success_files = [f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)]
-            
+
+            # A new scan may reuse the name of a different sheet processed earlier (scanner numbering restarts);
+            # give it its own name before backup and verification treat the two as one
+            files = self._rename_new_arrivals(files)
+
             # Total files known = root files + success files
             all_known_files = set(files + success_files)
             
@@ -3239,13 +3441,13 @@ class App(ctk.CTk):
             # Set total to PENDING files only
             self.total_files = len(pending_files)
             self.completed_count = 0
-            self.after(0, lambda: self.update_progress_ui())
+            self.ui_after(0, lambda: self.update_progress_ui())
             
             # Log start with failed count
             if failed_count > 0:
-                self.after(0, lambda fc=failed_count: self.log(self.t("log_start_failed_count", total=self.total_files, failed=fc)))
+                self.ui_after(0, lambda fc=failed_count: self.log(self.t("log_start_failed_count", total=self.total_files, failed=fc)))
             else:
-                self.after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=self.total_files)))
+                self.ui_after(0, lambda: self.log(self.t("msg_start", total=self.total_files, pending=self.total_files)))
             
             # Process pending files
             if pending_files:
@@ -3282,7 +3484,7 @@ class App(ctk.CTk):
                         self.total_files = len(failed_files)
                         self.completed_count = 0
                         
-                        self.after(0, lambda fc=len(failed_files): self.log(self.t("log_retry_failed", count=fc)))
+                        self.ui_after(0, lambda fc=len(failed_files): self.log(self.t("log_retry_failed", count=fc)))
                         
                         executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
                         try:
@@ -3309,12 +3511,13 @@ class App(ctk.CTk):
                 # Wait a bit for any pending writes to complete
                 time.sleep(2)
                 
-                self.after(0, lambda: self.log(self.t("log_regen_csv")))
+                self.ui_after(0, lambda: self.log(self.t("log_regen_csv")))
                 self.regenerate_csv_from_jsons()
-                
+                self.log_student_matches()
+
                 # Final count verification
 
-                self.after(0, lambda: self.log(self.t("log_verify_counts")))
+                self.ui_after(0, lambda: self.log(self.t("log_verify_counts")))
                 
                 # Count images in root + success
                 root_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
@@ -3341,23 +3544,82 @@ class App(ctk.CTk):
                             csv_rows = sum(1 for line in f) - 1  # Exclude header
                     except: pass
                 
-                self.after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows: 
+                self.ui_after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows:
                     self.log(self.t("log_grading_stats", ti=ti, jc=jc, mc=mc, cr=cr)))
 
             if self.stop_event.is_set():
-                self.after(0, lambda: self.log(self.t("msg_stopped")))
+                self.ui_after(0, lambda: self.log(self.t("msg_stopped")))
             else:
-                self.after(0, lambda: self.log(self.t("msg_finished")))
+                self.ui_after(0, lambda: self.log(self.t("msg_finished")))
                 
                 # Check completion again to prompt for review
-                self.after(1000, self.check_completion_status)
+                self.ui_after(1000, self.check_completion_status)
 
         except Exception as e:
             error_msg = str(e)
-            self.after(0, lambda e=error_msg: self.log(self.t("msg_error", error=e)))
+            self.ui_after(0, lambda e=error_msg: self.log(self.t("msg_error", error=e)))
         finally:
             self.processing = False
-            self.after(0, lambda: self.reset_ui_state())
+            self.ui_after(0, lambda: self.reset_ui_state())
+
+    def open_export_dialog(self, master=None):
+        """Export (from the review window): copy graded sheets out under their students' names."""
+        master = master or self
+        if self.processing:
+            messagebox.showinfo(self.t("title_export_sheets"), self.t("msg_export_busy"), parent=master)
+            return
+        sheets = find_graded_sheets(self.get_folder_path('reports'), [self.get_folder_path('success'), self.exam_folder]) if self.exam_folder else []
+        if not any(path for _, path in sheets):
+            messagebox.showinfo(self.t("title_export_sheets"), self.t("msg_export_nothing"), parent=master)
+            return
+        ExportSheetsDialog(self, sheets, master)
+
+    def run_export(self, pattern_key):
+        def work():
+            try:
+                dest, plan, missing = self.export_named_sheets(pattern_key)
+            except Exception as e:
+                self.ui_after(0, lambda e=str(e): self.log(self.t("log_export_failed", error=e)))
+                self.ui_after(0, lambda e=str(e): messagebox.showerror(self.t("title_error"), self.t("log_export_failed", error=e)))
+                return
+            check = sum(1 for _, _, confirmed, _ in plan if not confirmed)
+            self.ui_after(0, lambda: self.log(self.t("log_export_done", count=len(plan), check=check, folder=dest)))
+            if missing:
+                self.ui_after(0, lambda: self.log(self.t("log_export_missing", count=missing)))
+
+            def done():
+                if messagebox.askyesno(self.t("title_export_sheets"), self.t("msg_export_done", count=len(plan), folder=dest)):
+                    self.open_path(dest)
+            self.ui_after(0, done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def export_named_sheets(self, pattern_key='class_name'):
+        """
+        Copy every graded sheet into a new folder under the export folder, named after its student
+        (or 待核对-<image> while the student is not confirmed), with a list of what each file is.
+        Original images are not moved or renamed. Returns (export folder, plan, reports without an image).
+        """
+        sheets = find_graded_sheets(self.get_folder_path('reports'), [self.get_folder_path('success'), self.exam_folder])
+        plan = plan_export(sheets, NAME_PATTERNS[pattern_key], self.t("export_check_prefix"))
+        export_root = self.get_folder_path('exported')
+        os.makedirs(export_root, exist_ok=True)
+        dest = os.path.join(export_root, unique_filename(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"), [export_root]))
+        os.makedirs(dest)
+        for path, name, _, _ in plan:
+            shutil.copy2(path, os.path.join(dest, name))
+
+        is_en = (self.current_lang == "EN")
+        headers = (['Exported File', 'Status', 'Class', 'Name', 'ID', 'Room', 'Seat', 'Match Method', 'Original File', 'Current File'] if is_en
+                   else ['导出文件', '状态', '班级', '姓名', '考号', '考场', '座号', '匹配方式', '原始文件', '当前文件'])
+        with open(os.path.join(dest, self.t("export_list_file")), 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for path, name, confirmed, data in plan:
+                student = data.get('db_student_info') or {}
+                writer.writerow([name, self.t("export_status_confirmed" if confirmed else "export_status_check")]
+                                + [student.get(k, '') for k in ('class', 'name', 'id', 'room', 'seat')]
+                                + [self.match_label(data), os.path.basename(data.get('original_filename') or ''), os.path.basename(path)])
+        return dest, plan, sum(1 for _, path in sheets if not path)
 
     def open_review_window(self):
         if not self.exam_folder:
@@ -3379,19 +3641,42 @@ class App(ctk.CTk):
         # seat_no = db_info.get('seat', '未知')
 
     def on_review_save(self, data):
-        # 1. Regenerate Markdown
+        # 1. Regenerate Markdown & JSON
         db_info = data.get('db_student_info', {})
         md_content, sub_scores_dict, consistency_note, matches, _ = self.generate_report_content(data, db_info)
         
-        exam_room = db_info.get('room', '未知')
-        seat_no = db_info.get('seat', '未知')
-        filename_prefix = f"{exam_room}-{seat_no}"
-        
-        reports_dir = os.path.join(self.exam_folder, "reports")
+        exam_room = str(db_info.get('room', '未知')).strip()
+        seat_no = str(db_info.get('seat', '未知')).strip()
+        image_name = record_image_name(data)
+
+        reports_dir = self.get_folder_path('reports')
+        if not os.path.exists(reports_dir):
+            os.makedirs(reports_dir, exist_ok=True)
+
+        # Write back to this sheet's own report; changing the bound student must not move or overwrite reports
+        report_path = find_report(reports_dir, image_name, candidate_prefixes(db_info, image_name)) if image_name else None
+        if report_path:
+            filename_prefix = os.path.splitext(os.path.basename(report_path))[0]
+        elif exam_room and seat_no and exam_room != '未知' and seat_no != '未知':
+            filename_prefix = f"{exam_room}-{seat_no}"
+        else:
+            if image_name:
+                filename_prefix = os.path.splitext(image_name)[0]
+            else:
+                filename_prefix = f"{exam_room}-{seat_no}"
+        if not report_path and image_name:
+            filename_prefix = unique_report_prefix(reports_dir, filename_prefix, image_name)
+
         save_path = os.path.join(reports_dir, f"{filename_prefix}.md")
-        
         with open(save_path, "w", encoding="utf-8") as f:
             f.write(md_content)
+            
+        json_path = os.path.join(reports_dir, f"{filename_prefix}.json")
+        try:
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error saving JSON in on_review_save: {e}")
             
         # 2. Update CSV
         self.regenerate_csv_from_jsons()
@@ -3420,7 +3705,7 @@ class App(ctk.CTk):
         header_map = {
             '考场': 'Room', '座号': 'Seat', '班级': 'Class', '姓名': 'Name', '考号': 'ID',
             '总分': 'Total Score', '客观题': 'Objective Total', '主观题': 'Subjective Total',
-            '信息一致性': 'Consistency', '匹配项数': 'Matches',
+            '信息一致性': 'Consistency', '匹配项数': 'Matches', '匹配方式': 'Match Method',
             '复审状态': 'Review Status', '缺考标记': 'Absence Marker', '确认缺考': 'Confirm Absence',
             'OCR姓名': 'OCR Name', 'OCR班级': 'OCR Class', 'OCR考场': 'OCR Room',
             'OCR座号': 'OCR Seat', 'OCR手写考号': 'OCR Written ID', 'OCR填涂考号': 'OCR Filled ID',
@@ -3471,8 +3756,9 @@ class App(ctk.CTk):
                         '考号': db_info.get('id', '未知'),
                         '信息一致性': consistency_note,
                         '匹配项数': matches,
+                        '匹配方式': self.match_label(data),
                         '复审状态': review_status,
-                        '缺考标记': data.get('缺考标记', ''),
+                        '缺考标记': '是' if self.is_absent_record(data) else '',
                         '确认缺考': confirm_absence_display,
                         '总分': total_score,
                         '客观题': obj_score_sum,
@@ -3601,11 +3887,11 @@ class App(ctk.CTk):
         # 1. Basic Info
         if is_en:
             headers = ['Room', 'Seat', 'Class', 'Name', 'ID']
-            headers += ['Consistency', 'Matches', 'Review Status', 'Absence Marker', 'Confirm Absence']
+            headers += ['Consistency', 'Matches', 'Match Method', 'Review Status', 'Absence Marker', 'Confirm Absence']
             headers += ['Total Score', 'Objective Total', 'Subjective Total']
         else:
             headers = ['考场', '座号', '班级', '姓名', '考号']
-            headers += ['信息一致性', '匹配项数', '复审状态', '缺考标记', '确认缺考']
+            headers += ['信息一致性', '匹配项数', '匹配方式', '复审状态', '缺考标记', '确认缺考']
             headers += ['总分', '客观题', '主观题']
             
         # Collect all keys
@@ -3720,6 +4006,58 @@ class TemplateConfirmDialog(ctk.CTkToplevel):
         new_desc = self.textbox.get("1.0", "end-1c")
         self.on_confirm(new_desc)
         self.destroy()
+
+
+class ExportSheetsDialog(ctk.CTkToplevel):
+    """Choose how exported sheets are named, preview the names, then export."""
+    def __init__(self, parent, sheets, master=None):
+        master = master or parent
+        super().__init__(master)
+        self.parent = parent
+        self.sheets = sheets
+        self.title(parent.t("title_export_sheets"))
+        self.geometry("560x320")
+
+        # Center window over the window it was opened from
+        self.update_idletasks()
+        x = master.winfo_x() + (master.winfo_width() // 2) - 280
+        y = master.winfo_y() + (master.winfo_height() // 2) - 160
+        self.geometry(f"+{x}+{y}")
+
+        self.patterns = {parent.t(f"export_pattern_{key}"): key for key in NAME_PATTERNS}
+        ctk.CTkLabel(self, text=parent.t("lbl_export_pattern"), font=("Arial", 14, "bold")).pack(padx=20, pady=(16, 4), anchor="w")
+        self.combo_pattern = ctk.CTkComboBox(self, values=list(self.patterns), state="readonly", width=260, command=lambda _: self.update_preview())
+        self.combo_pattern.set(next(iter(self.patterns)))
+        self.combo_pattern.pack(padx=20, anchor="w")
+
+        self.lbl_summary = ctk.CTkLabel(self, text="", justify="left", wraplength=520)
+        self.lbl_summary.pack(padx=20, pady=(12, 4), anchor="w")
+        self.lbl_examples = ctk.CTkLabel(self, text="", justify="left", wraplength=520, text_color=("gray40", "gray60"))
+        self.lbl_examples.pack(padx=20, anchor="w")
+        ctk.CTkLabel(self, text=parent.t("lbl_export_note", folder=parent.get_folder_path('exported')), justify="left",
+                     wraplength=520, text_color=("gray40", "gray60")).pack(padx=20, pady=(8, 0), anchor="w")
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(side="bottom", fill="x", padx=20, pady=16)
+        self.btn_confirm = ctk.CTkButton(btn_frame, text=parent.t("btn_export_confirm"), fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER, command=self.confirm)
+        self.btn_confirm.pack(side="right")
+        ctk.CTkButton(btn_frame, text=parent.t("btn_cancel"), fg_color=Theme.TEXT_MUTED_LIGHT, command=self.destroy).pack(side="right", padx=10)
+
+        self.update_preview()
+        self.transient(master)
+        self.grab_set()
+
+    def update_preview(self):
+        t = self.parent.t
+        plan = plan_export(self.sheets, NAME_PATTERNS[self.patterns[self.combo_pattern.get()]], t("export_check_prefix"))
+        confirmed = sum(1 for _, _, ok, _ in plan if ok)
+        self.lbl_summary.configure(text=t("lbl_export_summary", total=len(plan), confirmed=confirmed, check=len(plan) - confirmed, prefix=t("export_check_prefix")))
+        self.lbl_examples.configure(text=t("lbl_export_examples", names="、".join(name for _, name, _, _ in plan[:3])))
+
+    def confirm(self):
+        pattern_key = self.patterns[self.combo_pattern.get()]
+        self.destroy()
+        self.parent.run_export(pattern_key)
 
 
 if __name__ == "__main__":

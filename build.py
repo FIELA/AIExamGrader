@@ -32,6 +32,8 @@ args = [
     '--hidden-import=google',
     '--collect-all=customtkinter', # Ensure all ctk submodules are found
     '--collect-binaries=PIL',  # Collect PIL binary dependencies
+    '--collect-all=pypdfium2',
+    '--collect-all=pypdfium2_raw',
 ]
 
 # Add --onefile for Windows to create a single executable

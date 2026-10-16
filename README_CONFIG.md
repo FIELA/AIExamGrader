@@ -1,5 +1,11 @@
 # Configuration Profile Guide
 
+## Configuration File Location
+
+The macOS app bundle saves configuration to `~/Library/Application Support/AIExamGrader/config.json`. The directory is created when saving, and the same file is used after moving or rebuilding the app. New configuration files are readable and writable only by the current user.
+
+To reuse a source installation's configuration, quit the app and copy its existing `config.json` to this location. Back up an existing destination before replacing it. Running from source continues to use `config.json` in the working directory; the quick start below applies to source installations.
+
 ## Quick Start
 
 1. Copy `config_example.json` to `config.json`:

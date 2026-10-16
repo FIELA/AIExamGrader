@@ -70,7 +70,7 @@ def sort_csv_headers(headers: list) -> list:
             return (0, priority.index(h))
         
         # 3. Details (Explicitly move to end, before OCR)
-        details_cols = ['信息一致性', 'Info Consistency', '匹配项数', 'Match Count']
+        details_cols = ['信息一致性', 'Info Consistency', '匹配项数', 'Match Count', '匹配方式', 'Match Method']
         if h in details_cols:
             return (2, details_cols.index(h))
             
