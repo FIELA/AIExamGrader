@@ -18,6 +18,8 @@ import tkinter as tk
 from tkinter import messagebox
 import threading
 from theme import Theme
+from report_files import build_report_index, candidate_prefixes, find_report, record_image_name, unique_report_prefix
+from student_manager import REVIEW_METHODS, student_key
 
 class ResumeDialog(ctk.CTkToplevel):
     def __init__(self, parent, title, message, btn_continue_text, btn_restart_text):
@@ -72,8 +74,10 @@ class ReviewWindow(ctk.CTkToplevel):
         self.reports_dir = self.parent_app.get_folder_path('reports')
         
         self.image_files = []
+        self.report_index = {}  # Image name -> its report JSON
         self.current_index = 0
         self.current_data = None
+        self.current_json_path = None  # Report the current sheet was loaded from
         self.current_image = None
         self.photo_image = None
         
@@ -107,12 +111,9 @@ class ReviewWindow(ctk.CTkToplevel):
         start_index = 0
         for i, f in enumerate(self.image_files):
             try:
-                student_info, _ = self.student_manager.get_student_by_filename(f)
-                room = str(student_info.get('room', '未知'))
-                seat = str(student_info.get('seat', '未知'))
-                json_path = os.path.join(self.reports_dir, f"{room}-{seat}.json")
-                
-                if os.path.exists(json_path):
+                json_path = self.find_report_json(f)
+
+                if json_path:
                     with open(json_path, 'r', encoding='utf-8') as jf:
                         d = json.load(jf)
                         if d.get('review_count', 0) == 0:
@@ -157,6 +158,51 @@ class ReviewWindow(ctk.CTkToplevel):
             return text.format(**kwargs)
         return text
 
+    def find_report_json(self, image_file):
+        """Report JSON that belongs to this image, or None if it has not been graded."""
+        filename_only = os.path.basename(image_file)
+        student_info, _ = self.student_manager.get_student_by_filename(filename_only)
+        return find_report(self.reports_dir, filename_only, candidate_prefixes(student_info, filename_only), self.report_index)
+
+    @staticmethod
+    def student_display(s):
+        """Dropdown text for a roster entry. Format: Name | Class | ID | Room-Seat"""
+        return f"{s['name']} | {s.get('class','')}班 | {s['id']} | {s.get('room','')}-{s.get('seat','')}"
+
+    def bind_selected_student(self, selected_str):
+        """Bind the student chosen in the dropdown; free text only updates the name and ID."""
+        try:
+            previous = dict(self.current_data.get('db_student_info') or {})
+            student = next((s for s in self.student_manager.students if self.student_display(s) == selected_str), None)
+            if student:
+                bound = dict(student)
+                if 'is_absent' in previous:
+                    bound['is_absent'] = previous['is_absent']  # The 缺 mark belongs to the scan
+                self.current_data['db_student_info'] = bound
+            else:
+                parts = selected_str.split(" | ")
+                name = parts[0]
+                sid = parts[2]
+                self.current_data['db_student_info']['name'] = name
+                self.current_data['db_student_info']['id'] = sid
+            if student_key(self.current_data['db_student_info']) != student_key(previous):
+                # Not the automatic match: the teacher chose this student
+                self.current_data['student_match'] = {'method': 'manual', 'candidates': []}
+        except: pass
+
+    def report_student(self, image_file):
+        """Student bound to this image's report, else the one its file name points to."""
+        json_path = self.find_report_json(image_file)
+        if json_path:
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    info = json.load(f).get('db_student_info')
+                if info:
+                    return info
+            except (OSError, ValueError):
+                pass
+        return self.student_manager.get_student_by_filename(os.path.basename(image_file))[0]
+
     def load_file_list(self):
         valid_extensions = ('.png', '.jpg', '.jpeg')
         if os.path.exists(self.exam_folder):
@@ -171,31 +217,14 @@ class ReviewWindow(ctk.CTkToplevel):
             
             # Combine lists (absolute paths)
             all_files = sorted(root_files + success_files)
-            
+
             self.image_files = []
-            
+            self.report_index = build_report_index(self.reports_dir)
+
             # Filter: Only include files with generated reports (JSON)
             for f in all_files:
                 try:
-                    # Handle relative path for filename check
-                    filename_only = os.path.basename(f)
-                    
-                    student_info, _ = self.student_manager.get_student_by_filename(filename_only)
-                    room = str(student_info.get('room', '未知'))
-                    seat = str(student_info.get('seat', '未知'))
-                    
-                    # Check JSON existence (primary data source)
-                    # Try room-seat format first
-                    json_path = os.path.join(self.reports_dir, f"{room}-{seat}.json")
-                    file_has_json = os.path.exists(json_path)
-                    
-                    # If not found and room/seat is unknown (or empty), try filename-based JSON
-                    if not file_has_json and (room == '未知' or seat == '未知' or not room or not seat):
-                        base_name = os.path.splitext(filename_only)[0]
-                        fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
-                        file_has_json = os.path.exists(fallback_json_path)
-                    
-                    if file_has_json:
+                    if self.find_report_json(f):
                         self.image_files.append(f)
                 except Exception as e:
                     pass
@@ -238,6 +267,9 @@ class ReviewWindow(ctk.CTkToplevel):
         
         self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), image=self.parent_app.icons.get("document"), width=60, command=self.show_review_logs, fg_color=Theme.TEXT_MUTED_DARK)
         self.btn_logs.pack(side="left", padx=5)
+
+        self.btn_export = ctk.CTkButton(self.action_frame, text=self.t("btn_export"), image=self.parent_app.icons.get("folder"), width=60, command=self.open_export, fg_color="#0F766E", hover_color="#115E59")
+        self.btn_export.pack(side="left", padx=5)
         
         # --- Right Group (Packed from Right to Left) ---
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER)
@@ -361,6 +393,9 @@ class ReviewWindow(ctk.CTkToplevel):
         
         self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
         self.btn_logs.pack(side="left", padx=5)
+
+        self.btn_export = ctk.CTkButton(self.action_frame, text=self.t("btn_export"), width=60, command=self.open_export, fg_color="#0F766E", hover_color="#115E59")
+        self.btn_export.pack(side="left", padx=5)
         
         # --- Right Group (Packed from Right to Left) ---
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
@@ -449,8 +484,15 @@ class ReviewWindow(ctk.CTkToplevel):
             self.current_index += 1
             self.load_current_student()
         else:
-            messagebox.showinfo(self.t("title_success"), self.t("msg_all_reviewed"))
+            # Review is done: offer to export the sheets under their students' names
+            export = messagebox.askyesno(self.t("title_success"), self.t("msg_all_reviewed_export"), parent=self)
             self.destroy()
+            if export:
+                self.parent_app.open_export_dialog()
+
+    def open_export(self):
+        """Export the sheets named after their students, using the reports saved so far."""
+        self.parent_app.open_export_dialog(self)
             
     def prev_student(self):
         if self.current_index > 0:
@@ -475,10 +517,9 @@ class ReviewWindow(ctk.CTkToplevel):
         found_index = -1
         
         for idx, filename in enumerate(self.image_files):
-            # We need to peek at student info without fully loading if possible, 
-            # or just use the student_manager which should have it cached.
-            student_info, _ = self.student_manager.get_student_by_filename(filename)
-            
+            # The student in the report, so sheets matched by handwritten name can be found too
+            student_info = self.report_student(filename)
+
             name = str(student_info.get('name', '')).lower()
             sid = str(student_info.get('id', '')).lower()
             if sid.endswith('.0'): sid = sid[:-2] # Handle float conversion artifacts
@@ -677,24 +718,17 @@ class ReviewWindow(ctk.CTkToplevel):
         student_info, _ = self.student_manager.get_student_by_filename(filename_only)
         room = str(student_info.get('room', '未知'))
         seat = str(student_info.get('seat', '未知'))
-        
-        json_name = f"{room}-{seat}.json"
-        json_path = os.path.join(self.reports_dir, json_name)
-        
+
+        # The report that records this image (never another sheet's Room-Seat report)
+        json_path = self.find_report_json(filename_only)
+        self.current_json_path = json_path
+
         json_loaded = False
-        if os.path.exists(json_path):
+        if json_path:
             with open(json_path, "r", encoding="utf-8") as f:
                 self.current_data = json.load(f)
                 json_loaded = True
-        elif room == '未知' or seat == '未知' or not room or not seat:
-            # Fallback: Try loading by filename
-            base_name = os.path.splitext(filename_only)[0]
-            fallback_json_path = os.path.join(self.reports_dir, f"{base_name}.json")
-            if os.path.exists(fallback_json_path):
-                with open(fallback_json_path, "r", encoding="utf-8") as f:
-                    self.current_data = json.load(f)
-                    json_loaded = True
-        
+
         if not json_loaded:
             # Legacy Support: Try to load from CSV
             csv_score = 0
@@ -770,14 +804,16 @@ class ReviewWindow(ctk.CTkToplevel):
             self.chk_absence_var.set(is_absent)
             
         # 3. Load Report Text
-        md_name = f"{room}-{seat}.md"
-        md_path = os.path.join(self.reports_dir, md_name)
-        
+        if json_path:
+            md_path = os.path.splitext(json_path)[0] + ".md"
+        else:
+            md_path = os.path.join(self.reports_dir, f"{room}-{seat}.md")
+
         md_content = ""
         if os.path.exists(md_path):
             with open(md_path, "r", encoding="utf-8") as f:
                 md_content = f.read()
-        elif room == '未知' or seat == '未知' or not room or not seat:
+        elif not json_path and (room == '未知' or seat == '未知' or not room or not seat):
              # Fallback: Try loading by filename
             base_name = os.path.splitext(filename_only)[0]
             fallback_md_path = os.path.join(self.reports_dir, f"{base_name}.md")
@@ -1059,7 +1095,15 @@ class ReviewWindow(ctk.CTkToplevel):
 
     def render_info_step(self, parent, show_buttons=True):
         db_info = self.current_data.get('db_student_info', {})
-        
+        student_match = self.current_data.get('student_match') or {}
+
+        # --- Automatic Match (handwritten name and class against the roster) ---
+        if student_match.get('method'):
+            text = self.t("lbl_auto_match", name=self.current_data.get('ocr_name') or '-',
+                          klass=self.current_data.get('ocr_class') or '-', method=self.t(f"match_{student_match['method']}"))
+            color = Theme.WARNING if student_match['method'] in REVIEW_METHODS else None
+            ctk.CTkLabel(parent, text=text, text_color=color, wraplength=400, justify="left").pack(anchor="w", pady=(0, 5))
+
         # --- Search Filter ---
         ctk.CTkLabel(parent, text=self.t("lbl_filter")).pack(anchor="w")
         self.entry_filter = ctk.CTkEntry(parent, placeholder_text=self.t("lbl_filter"))
@@ -1070,11 +1114,12 @@ class ReviewWindow(ctk.CTkToplevel):
         ctk.CTkLabel(parent, text=self.t("lbl_select_student")).pack(anchor="w")
         
         # Format: Name | Class | ID | Room-Seat
-        self.full_student_list = [
-            f"{s['name']} | {s.get('class','')}班 | {s['id']} | {s.get('room','')}-{s.get('seat','')}" 
-            for s in self.student_manager.students
-        ]
-        
+        self.full_student_list = [self.student_display(s) for s in self.student_manager.students]
+        # Candidates from the automatic match come first
+        suggested = [self.student_display(c) for c in student_match.get('candidates', [])]
+        suggested = [s for s in dict.fromkeys(suggested) if s in self.full_student_list]
+        self.full_student_list = suggested + [s for s in self.full_student_list if s not in suggested]
+
         current_val = f"{db_info.get('name', '')} | {db_info.get('class','')}班 | {db_info.get('id', '')} | {db_info.get('room','')}-{db_info.get('seat','')}"
         
         self.combo_student = ctk.CTkComboBox(parent, values=self.full_student_list, width=400)
@@ -1108,20 +1153,30 @@ class ReviewWindow(ctk.CTkToplevel):
         obj_items.sort(key=get_sort_key)
         
         # --- Summary Header ---
+        is_en = (self.lang == "EN")
         if obj_items:
             obj_score = sum(x.get('score', 0) for x in obj_items)
+            obj_max = sum(x.get('max_score', 2) for x in obj_items)
             obj_correct = len([x for x in obj_items if x.get('score', 0) > 0])
+            scores_per_q = [x.get('max_score', 2) for x in obj_items]
+            per_q = scores_per_q[0] if scores_per_q and len(set(scores_per_q)) == 1 else None
         else:
             obj_score = self.current_data.get('legacy_obj_score', 0)
-            obj_correct = int(obj_score / 3)
+            is_grade_11 = (hasattr(self, 'exam_folder') and self.exam_folder and "高二" in str(self.exam_folder))
+            obj_max = 50 if is_grade_11 else 48
+            per_q = 2 if is_grade_11 else 3
+            obj_correct = int(obj_score / per_q) if obj_score > 0 else 0
             
         header_frame = ctk.CTkFrame(parent, fg_color="transparent")
         header_frame.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(header_frame, text=self.t("lbl_correct_count")).pack(side="left")
+        lbl_correct_text = (f"Correct Count (x{per_q}):" if per_q else "Correct Count:") if is_en else (f"正确个数 (x{per_q}):" if per_q else "正确个数:")
+        lbl_total_text = f"Total Score (Max {obj_max}):" if is_en else f"总分 (Max {obj_max}):"
+        
+        ctk.CTkLabel(header_frame, text=lbl_correct_text).pack(side="left")
         ctk.CTkLabel(header_frame, text=f"{obj_correct}", font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
-        ctk.CTkLabel(header_frame, text=self.t("lbl_total_score")).pack(side="left", padx=(20, 0))
+        ctk.CTkLabel(header_frame, text=lbl_total_text).pack(side="left", padx=(20, 0))
         ctk.CTkLabel(header_frame, text=f"{obj_score}", font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
         # --- Grid Layout for Questions ---
@@ -1248,23 +1303,9 @@ class ReviewWindow(ctk.CTkToplevel):
         if now - self.last_confirm_time < 3.0:
             return
         self.last_confirm_time = now
-        
-        selected_str = self.combo_student.get()
-        try:
-            parts = selected_str.split(" | ")
-            name = parts[0]
-            sid = parts[2]
-            found = False
-            for s in self.student_manager.students:
-                if s['name'] == name and str(s['id']) == str(sid):
-                    self.current_data['db_student_info'] = s
-                    found = True
-                    break
-            if not found:
-                self.current_data['db_student_info']['name'] = name
-                self.current_data['db_student_info']['id'] = sid
-        except: pass
-        
+
+        self.bind_selected_student(self.combo_student.get())
+
         # 2. Save Obj
         try:
             new_score = float(self.entry_obj_score.get())
@@ -1365,22 +1406,8 @@ class ReviewWindow(ctk.CTkToplevel):
         step = self.steps[self.current_step_index]
         
         if step['type'] == 'info':
-            selected_str = self.combo_student.get()
-            try:
-                parts = selected_str.split(" | ")
-                name = parts[0]
-                sid = parts[2]
-                found = False
-                for s in self.student_manager.students:
-                    if s['name'] == name and str(s['id']) == str(sid):
-                        self.current_data['db_student_info'] = s
-                        found = True
-                        break
-                if not found:
-                    self.current_data['db_student_info']['name'] = name
-                    self.current_data['db_student_info']['id'] = sid
-            except: pass
-            
+            self.bind_selected_student(self.combo_student.get())
+
         elif step['type'] == 'obj':
             try:
                 new_score = float(self.entry_obj_score.get())
@@ -1544,17 +1571,24 @@ class ReviewWindow(ctk.CTkToplevel):
     def on_obj_count_change(self, choice):
         try:
             count = int(choice)
-            score = count * 3
+            details = self.current_data.get('details', []) if hasattr(self, 'current_data') and self.current_data else []
+            obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+            pts = obj_items[0].get('max_score', 2) if obj_items else (2 if (hasattr(self, 'exam_folder') and "高二" in str(self.exam_folder)) else 3)
+            score = count * pts
             self.var_obj_score.set(str(score))
         except: pass
 
     def on_obj_score_change(self, event=None):
-        # Optional: Reverse update count if score matches a multiple of 3
+        # Optional: Reverse update count if score matches a multiple of pts
         try:
             score = int(self.entry_obj_score.get())
-            if score % 3 == 0:
-                count = score // 3
-                if 0 <= count <= 16:
+            details = self.current_data.get('details', []) if hasattr(self, 'current_data') and self.current_data else []
+            obj_items = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
+            pts = obj_items[0].get('max_score', 2) if obj_items else (2 if (hasattr(self, 'exam_folder') and "高二" in str(self.exam_folder)) else 3)
+            max_count = len(obj_items) if obj_items else (25 if (hasattr(self, 'exam_folder') and "高二" in str(self.exam_folder)) else 16)
+            if score % pts == 0:
+                count = score // pts
+                if 0 <= count <= max_count:
                     self.var_obj_count.set(str(count))
         except: pass
 
@@ -1563,12 +1597,32 @@ class ReviewWindow(ctk.CTkToplevel):
         
         self.update_score_display()
         
-        # 1. Save to JSON
-        room = str(self.current_data.get('db_student_info', {}).get('room', '未知'))
-        seat = str(self.current_data.get('db_student_info', {}).get('seat', '未知'))
-        json_name = f"{room}-{seat}.json"
-        json_path = os.path.join(self.reports_dir, json_name)
-        md_path = os.path.join(self.reports_dir, f"{room}-{seat}.md")
+        # 1. Save to JSON & MD
+        # Write back to the report this sheet was loaded from: binding another student must neither
+        # leave this report behind nor overwrite the report of that student's own sheet
+        json_path = getattr(self, 'current_json_path', None)
+        if not json_path:
+            room = str(self.current_data.get('db_student_info', {}).get('room', '未知')).strip()
+            seat = str(self.current_data.get('db_student_info', {}).get('seat', '未知')).strip()
+            current_img = self.image_files[self.current_index] if (hasattr(self, 'image_files') and 0 <= self.current_index < len(self.image_files)) else ""
+
+            if room and seat and room != '未知' and seat != '未知':
+                file_prefix = f"{room}-{seat}"
+            else:
+                orig = self.current_data.get('renamed_filename') or self.current_data.get('original_filename') or current_img
+                if orig:
+                    file_prefix = os.path.splitext(os.path.basename(orig))[0]
+                else:
+                    file_prefix = f"{room}-{seat}"
+
+            image_name = record_image_name(self.current_data) or os.path.basename(current_img)
+            if image_name:
+                file_prefix = unique_report_prefix(self.reports_dir, file_prefix, image_name)
+            json_path = os.path.join(self.reports_dir, f"{file_prefix}.json")
+            self.current_json_path = json_path
+            if image_name:
+                self.report_index[image_name] = json_path
+        md_path = os.path.splitext(json_path)[0] + ".md"
         
         # Increment Review Count
         current_count = self.current_data.get('review_count', 0)
@@ -1666,21 +1720,26 @@ class ReviewWindow(ctk.CTkToplevel):
             is_en = (self.parent_app.current_lang == "EN") if hasattr(self.parent_app, 'current_lang') else False
             
             # Prioritize grading_data
-            # Prioritize grading_data
             grading_data_dir = self.parent_app.get_folder_path('grading_data')
-            csv_path = os.path.join(grading_data_dir, "Grade_Summary.csv")
+            csv_filename = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
+            csv_path = os.path.join(grading_data_dir, csv_filename)
             
-            # Legacy fallback check (if grading_data CSV doesn't exist but root one does)
-
-            # If grading_data CSV exists, use it.
-            # If not, check root.
-            
+            # Check alternative name in grading_data
             if not os.path.exists(csv_path):
-                 # Check root legacy
-                 legacy_name = "Grade_Summary.csv" if is_en else "成绩汇总表.csv"
-                 legacy_path = os.path.join(self.exam_folder, legacy_name)
-                 if os.path.exists(legacy_path):
-                     csv_path = legacy_path
+                alt_name = "成绩汇总表.csv" if is_en else "Grade_Summary.csv"
+                alt_path = os.path.join(grading_data_dir, alt_name)
+                if os.path.exists(alt_path):
+                    csv_path = alt_path
+
+            # Legacy fallback check (if grading_data CSV doesn't exist but root one does)
+            if not os.path.exists(csv_path):
+                legacy_path = os.path.join(self.exam_folder, csv_filename)
+                if os.path.exists(legacy_path):
+                    csv_path = legacy_path
+                else:
+                    alt_legacy = os.path.join(self.exam_folder, "成绩汇总表.csv" if is_en else "Grade_Summary.csv")
+                    if os.path.exists(alt_legacy):
+                        csv_path = alt_legacy
             
             if not os.path.exists(csv_path):
                 # If CSV doesn't exist at all, use callback to generate it
@@ -1708,16 +1767,15 @@ class ReviewWindow(ctk.CTkToplevel):
             subj_score_key = 'Subjective Score' if is_en else '主观题'
             status_key = 'Review Status' if is_en else '复审状态'
             confirm_key = 'Confirm Absence' if is_en else '确认缺考'
-            
-            new_keys = [status_key, confirm_key, obj_score_key, obj_correct_key, obj_total_key, subj_score_key]
+            match_method_key = 'Match Method' if is_en else '匹配方式'
+
+            new_keys = [status_key, confirm_key, obj_score_key, obj_correct_key, obj_total_key, subj_score_key, match_method_key]
             for key in new_keys:
                 if key not in headers:
                     headers.append(key)
             
             # Sort Headers using shared utility
             headers = sort_csv_headers(headers)
-            
-            # Helper to normalize values (remove leading zeros)
             
             # Helper to normalize values (remove leading zeros)
             def normalize(val):
@@ -1731,15 +1789,45 @@ class ReviewWindow(ctk.CTkToplevel):
             target_room = normalize(db_info.get('room', ''))
             target_seat = normalize(db_info.get('seat', ''))
             
+            current_img = self.image_files[self.current_index] if (hasattr(self, 'image_files') and 0 <= self.current_index < len(self.image_files)) else ""
+            target_orig = os.path.basename(self.current_data.get('original_filename') or current_img)
+            target_renamed = os.path.basename(self.current_data.get('renamed_filename', ''))
+            
             room_key = 'Room' if is_en else '考场'
             seat_key = 'Seat' if is_en else '座号'
+            orig_key = 'Original File' if is_en else '原始文件'
+            renamed_key = 'Renamed File' if is_en else '重命名文件'
+            name_key = 'Name' if is_en else '姓名'
+            class_key = 'Class' if is_en else '班级'
+            id_key = 'ID' if is_en else '考号'
             
             row_found = False
             for row in rows:
-                csv_room = normalize(row.get(room_key, ''))
-                csv_seat = normalize(row.get(seat_key, ''))
+                matched = False
+                csv_orig = os.path.basename(row.get(orig_key, ''))
+                csv_renamed = os.path.basename(row.get(renamed_key, ''))
                 
-                if csv_room == target_room and csv_seat == target_seat:
+                # Priority 1: Match by unique original/renamed filename
+                if target_orig and (csv_orig == target_orig or csv_renamed == target_orig):
+                    matched = True
+                elif target_renamed and (csv_orig == target_renamed or csv_renamed == target_renamed):
+                    matched = True
+                elif target_room and target_seat and target_room != '未知' and target_seat != '未知':
+                    # Priority 2: Match by Room + Seat if both are non-empty and valid
+                    csv_room = normalize(row.get(room_key, ''))
+                    csv_seat = normalize(row.get(seat_key, ''))
+                    if csv_room == target_room and csv_seat == target_seat:
+                        matched = True
+                
+                if matched:
+                    # Update student identity in CSV; a student without an ID or seat clears the old values
+                    for field, key in (('name', name_key), ('class', class_key), ('id', id_key), ('room', room_key), ('seat', seat_key)):
+                        if db_info.get(field, '') != '未知':
+                            row[key] = str(db_info.get(field, ''))
+                    method = (self.current_data.get('student_match') or {}).get('method')
+                    if method:
+                        row[match_method_key] = self.t(f"match_{method}")
+
                     # Update scores
                     row[total_key] = str(self.current_data.get('total_score', 0))
                     
@@ -1796,15 +1884,15 @@ class ReviewWindow(ctk.CTkToplevel):
             
             # Write back to CSV
             if row_found:
-                # Numeric Conversion for Excel
+                # Numeric Conversion for Excel (preserve ID as string)
                 for r in rows:
                     for k, v in r.items():
                         # Convert Room/Seat to int to remove leading zeros
                         if k in ['Room', 'Seat', '考场', '座号']:
                             try: r[k] = int(v)
                             except: pass
-                        # Convert Scores/ID to numbers
-                        elif k in ['ID', '考号', 'Total Score', '总分', 'Objective Score', '客观题', 
+                        # Convert Scores to numbers (keep ID/考号 intact as string to preserve leading zeros)
+                        elif k in ['Total Score', '总分', 'Objective Score', '客观题', 
                                    'Subjective Score', '主观题', 'Objective Correct', '客观题正确数', 
                                    'Objective Total', '客观题总数']:
                             try:
@@ -1820,7 +1908,7 @@ class ReviewWindow(ctk.CTkToplevel):
                     writer.writerows(rows)
 
             else:
-                # Silent failure or log to console only if needed, but user asked to cancel debug mode
+                # Silent failure or log to console only if needed
                 pass
                 
         except PermissionError:
@@ -1828,9 +1916,12 @@ class ReviewWindow(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error updating CSV: {e}")
             messagebox.showerror(self.t("title_error"), f"Failed to update CSV: {str(e)}")
-            # Fallback to callback
-            if self.on_save_callback:
-                self.on_save_callback(self.current_data)
+            # Safe callback attempt without crashing
+            try:
+                if self.on_save_callback:
+                    self.on_save_callback(self.current_data)
+            except Exception as cb_err:
+                print(f"Callback in error handler also failed: {cb_err}")
 
 
     def show_review_logs(self):

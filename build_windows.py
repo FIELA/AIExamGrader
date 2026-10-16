@@ -27,6 +27,8 @@ print(f"CustomTkinter path: {ctk_path}")
 
 # Define PyInstaller arguments for Windows
 args = [
+    '--collect-all=pypdfium2',
+    '--collect-all=pypdfium2_raw',
     'AutoGrader.py',  # Main script
     '--name=AI Exam Grader',  # App name
     '--onefile',  # Create a single executable file (CRITICAL for single .exe)
