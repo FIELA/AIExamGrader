@@ -8,7 +8,7 @@ English | [简体中文](README_CN.md)
 
 ---
 
-AI Exam Grader grades handwritten answer sheets with a vision model from OpenAI (or a compatible API) or Google Gemini. It reads each student's details, scores the answers against your rubric, and writes a report for every sheet plus a grade summary. You can then review the results and export the sheets named after their students.
+AI Exam Grader grades handwritten answer sheets with a vision model from OpenAI (or a compatible API) or Google Gemini. It reads each student's details, scores the answers against your rubric, and writes a report for every sheet plus a grade summary. After you review the results, the sheets are renamed after their students.
 
 > [!IMPORTANT]
 > **License Notice**
@@ -33,7 +33,7 @@ AI Exam Grader grades handwritten answer sheets with a vision model from OpenAI 
   - A name that is one character off is still matched, but flagged for checking.
   - When a sheet is unclear, no student is picked; candidates are listed instead.
 - **Review**: check each sheet's student, objective answers and subjective scores, with or without the scan beside them. Search by name, exam number or Room-Seat. Every change is logged.
-- **Export named sheets**: after review, copy the sheets with names such as "Class-Name.jpg". Repeated names get a suffix, and an export list is written alongside. The original scans are not touched.
+- **Sheets named after students**: when review is finished, each graded sheet is renamed "Class-Name.jpg" (e.g. `701-张三.jpg`). Repeated names get a suffix, and sheets whose student is not yet confirmed, or marked No Name, keep their names. The scans stay in the original files backup.
 - **Safe data**: scans are backed up before grading. Each sheet keeps its own report, so rescanned sheets and repeated file names never overwrite each other. Chinese and English interface.
 
 > [!NOTE]
@@ -65,11 +65,13 @@ To build an app: run `python build.py` on macOS or `python build_windows.py` on 
 3. **Grade**: click "Start Grading".
    - On the first run, the answer key and the sheet layout are extracted for you to confirm before grading starts.
    - If you stop and start again, only unfinished sheets are graded; failed sheets are retried automatically.
-   - When grading ends, the log summarizes the matching: how many sheets match the roster, how many need checking, and how many roster students have no sheet.
-4. **Review**: click "Review" and go through each sheet's student, objective and subjective steps, then click "Confirm & Next".
+   - When grading ends, the log summarizes the matching: how many sheets match the roster, how many need checking, and how many roster students have no sheet. A student on several sheets (e.g. a sheet scanned twice), a report whose sheet is missing, or counts that disagree are listed one by one, and the log ends with the number of issues to handle instead of "Finished!".
+4. **Review**: click "Review" and go through each sheet's student, objective and subjective steps, then click "Confirm & Next". Confirming a sheet without a student opens a prompt. Close (the default) lets you choose the student; confirm again to go on. If the sheet has no name on it, choose No Name instead: the sheet is confirmed, the next one opens, and the grade summary's match method reads "No name on sheet".
+   - Sheets are shown in the order they were scanned, as the paper pile is; a sheet renamed after its exam number or student stays in its place.
    - Sheets that need checking show what was recognized, and the candidate students appear first in the dropdown. A student you choose is recorded as "Chosen in review".
+   - If the student is on other sheets too, the student panel names them with their scores and review status: the sheet may have been scanned twice. On the extra one, click "Remove This Sheet": its image and report move to `removed/` and leave the grade summary, while the scan stays in `original_files/`. Do not delete sheets in Finder, which leaves their reports behind and the counts off.
    - Use "Regrade" to grade a single sheet again. After changing the answer key, use "Regrade Obj." in the main window to recalculate all sheets.
-5. **Export**: in the review window, click "Export Sheets" (you are also asked after confirming the last sheet). Choose a name format: Class-Name, Class-Name-ID, ID-Name or Room-Seat-Name. Sheets whose student is not yet confirmed are named `CHECK-<original name>`.
+5. **Renaming**: once every sheet is reviewed (passing the last sheet while some are skipped or not reviewed yet tells you how many are left and opens the first of them), the graded sheets are renamed "Class-Name" where they are (in `success/`), and their reports and the grade summary record the new names. A scan missing from `original_files/` is backed up first. If grading is still running, renaming waits until you finish reviewing after it.
 
 **File name tips**
 
@@ -78,16 +80,16 @@ To build an app: run `python build.py` on macOS or `python build_windows.py` on 
 
 ## 📂 Output
 
-Everything is written inside the answer-sheet folder. The Chinese interface uses Chinese folder names (阅卷数据, 阅卷报告, 原始文件, 成功归档, 失败归档, 导出答题卡).
+Everything is written inside the answer-sheet folder. The Chinese interface uses Chinese folder names (阅卷数据, 阅卷报告, 原始文件, 成功归档, 失败归档).
 
 ```
 answer-sheet folder/
 ├─ grading_data/     answer key, sheet layout, PDF transcription and Grade_Summary.csv
 ├─ reports/          one .md report and one .json file per sheet
-├─ original_files/   backup of the scans, taken before grading
-├─ success/          graded sheets (a sheet not named Room-Seat is renamed to its exam number when one is read)
+├─ original_files/   backup of the scans under their scanned names, taken before grading
+├─ success/          graded sheets, renamed Class-Name after review (until then, a sheet not named Room-Seat is renamed to its exam number when one is read)
 ├─ failed/           sheets that failed, retried on the next run
-└─ exported_sheets/  one timestamped folder per export, with the named copies and export_list.csv
+└─ removed/          sheets taken out of the grades in review (e.g. scanned twice): one dated folder each, image and report kept where they were, so moving them back restores them
 ```
 
 The grade summary lists each student's details, total score, scores for each objective and subjective question, the student details read from the sheet, the information check, the match method, the review status and the absence mark.

@@ -28,12 +28,13 @@ from tooltip import ToolTip
 from tkinter import filedialog, messagebox
 import subprocess
 import filecmp
+import gc
 
 # Import new modules
 from config_manager import ConfigManager
-from student_manager import StudentManager, name_key, same_class, student_key
+from student_manager import UNSIGNED, StudentManager, name_key, same_class, student_key
 from report_files import candidate_prefixes, find_report, record_image_name, unique_filename, unique_report_prefix
-from sheet_export import NAME_PATTERNS, find_graded_sheets, plan_export
+from sheet_naming import find_graded_sheets, identity_confirmed, original_name, sheet_label, sheet_name
 from grader_engine import AIGraderEngine
 from rubric_loader import RubricLoader
 from translations import TRANSLATIONS
@@ -45,6 +46,11 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self._ui_queue = queue.Queue()
+        # Destroyed windows leave reference cycles holding Tk fonts, images and variables, whose finalizers call Tcl.
+        # This Tcl 9 build does not pass calls from other threads to the main thread, so a cyclic collection started
+        # by a worker's allocations ran them inside the worker and crashed the app (after review, during export).
+        # Cycles are therefore collected only on the main thread, by _drain_ui_queue.
+        gc.disable()
         self.after(50, self._drain_ui_queue)
 
         # Hide main window initially
@@ -188,7 +194,15 @@ class App(ctk.CTk):
             except queue.Empty:
                 break
             self.after(delay, callback, *args)
+        self._collect_garbage()
         self.after(50, self._drain_ui_queue)
+
+    @staticmethod
+    def _collect_garbage():
+        """Run the collection automatic GC would have run by now, here on the main thread (see __init__)."""
+        counts, thresholds = gc.get_count(), gc.get_threshold()
+        if counts[0] > thresholds[0]:
+            gc.collect(next(g for g in (2, 1, 0) if g == 0 or counts[g] > thresholds[g]))
 
     def ui_after(self, delay, callback, *args):
         """Workers enqueue Python data; only the main thread enters Tcl/Tk."""
@@ -331,10 +345,10 @@ class App(ctk.CTk):
         """
         Get the path for a specific folder type (grading_data, reports, etc.)
         Checks for existing folders in both languages, defaults to current language.
-        key: 'grading_data', 'original_files', 'reports', 'success', 'failed'
+        key: 'grading_data', 'original_files', 'reports', 'success', 'failed', 'removed'
         """
         if not self.exam_folder: return None
-        
+
         # Define possible names (EN, CN)
         # We could load from translations, but hardcoding here ensures we know what to look for
         # regardless of current loaded language file state.
@@ -344,7 +358,7 @@ class App(ctk.CTk):
             'reports': ['reports', '阅卷报告'],
             'success': ['success', '成功归档'],
             'failed': ['failed', '失败归档'],
-            'exported': ['exported_sheets', '导出答题卡']
+            'removed': ['removed', '已移除']  # Sheets taken out of the grades in review, e.g. scanned twice
         }
         
         possible_names = names_map.get(key, [key])
@@ -2957,9 +2971,8 @@ class App(ctk.CTk):
         # Ensure grader engine exists
         if not hasattr(self, 'grader_engine') or self.grader_engine is None:
             try:
-                # Use current_api_key if available
-                api_key = getattr(self, "current_api_key", self.entry_key.get())
-                self.grader_engine = AIGraderEngine(self.provider_var.get(), api_key, self.entry_base.get(), self.combo_model.get())
+                # This runs in the review window's worker: the settings are read on the main thread
+                self.grader_engine = self._create_grader()
             except Exception as e:
                 self.log(self.t("log_engine_init_failed", error=e))
                 return False, str(e)
@@ -2996,7 +3009,9 @@ class App(ctk.CTk):
                 previous_match = previous.get('student_match')
                 # Reports from before match records keep any known student, as it may have been chosen in review
                 chosen = previous_match.get('method') == 'manual' if previous_match else bound.get('name') not in (None, '', '未知')
-                if chosen and student_key(bound) != student_key(student_info):
+                # A sheet marked unsigned in review stays unsigned, whatever the new reading finds
+                unsigned = (previous_match or {}).get('method') == UNSIGNED
+                if (chosen and student_key(bound) != student_key(student_info)) or unsigned:
                     student_info = dict(bound)
                     result['student_match'] = previous_match or {'method': 'manual', 'candidates': []}
 
@@ -3176,12 +3191,54 @@ class App(ctk.CTk):
             result.append(f)
         return result
 
-    def log_student_matches(self):
-        """After a batch: how many sheets need their student checked, students on several sheets, roster students without one."""
+    def rematch_students(self):
+        """
+        Match each graded sheet whose student is not confirmed to the current roster again, using the OCR saved
+        in its report (no model calls). Students chosen in review or matched with certainty are kept, and so are
+        sheets marked unsigned (未署名) in review.
+        Returns how many reports changed.
+        """
         reports_dir = self.get_folder_path('reports')
         if not self.student_manager.students or not reports_dir or not os.path.isdir(reports_dir):
-            return
-        records = []
+            return 0
+        changed = 0
+        for name in sorted(os.listdir(reports_dir)):
+            if not name.endswith('.json'):
+                continue
+            json_path = os.path.join(reports_dir, name)
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or identity_confirmed(data) or (data.get('student_match') or {}).get('method') == UNSIGNED:
+                continue
+            previous = data.get('db_student_info') or {}
+            student, match = self.student_manager.resolve_student(record_image_name(data) or name, data)
+            if student_key(student) == student_key(previous) and match == data.get('student_match'):
+                continue
+            student['is_absent'] = previous.get('is_absent', False)
+            data['db_student_info'], data['student_match'] = student, match
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            with open(os.path.splitext(json_path)[0] + '.md', 'w', encoding='utf-8') as f:
+                f.write(self.generate_report_content(data, student)[0])
+            changed += 1
+        if changed:
+            self.regenerate_csv_from_jsons()
+            self.log(self.t("log_rematched", count=changed))
+        return changed
+
+    def log_student_matches(self):
+        """
+        After a batch: how many sheets need their student checked, students on several sheets (with each sheet's score
+        and review status, to tell a sheet scanned twice), roster students without one.
+        Returns how many students are on several sheets.
+        """
+        reports_dir = self.get_folder_path('reports')
+        if not self.student_manager.students or not reports_dir or not os.path.isdir(reports_dir):
+            return 0
+        records, reports = [], {}
         for name in sorted(os.listdir(reports_dir)):
             if name.endswith('.json'):
                 try:
@@ -3189,12 +3246,59 @@ class App(ctk.CTk):
                         data = json.load(f)
                 except (OSError, ValueError):
                     continue
-                records.append((record_image_name(data) or name, data.get('db_student_info') or {}, (data.get('student_match') or {}).get('method')))
+                image = record_image_name(data) or name
+                reports.setdefault(image, data)
+                records.append((image, data.get('db_student_info') or {}, (data.get('student_match') or {}).get('method')))
         to_check, several, without_sheet = self.student_manager.match_summary(records)
         self.ui_after(0, lambda: self.log(self.t("log_match_summary", matched=len(records) - len(to_check), review=len(to_check), missing=len(without_sheet))))
         for key, images in several.items():
             student = f"{key[0]}({key[1]})"
-            self.ui_after(0, lambda s=student, i="、".join(images): self.log(self.t("log_match_several", student=s, files=i)))
+            files = "、".join(sheet_label(reports[image], image, self.t) for image in images)
+            self.ui_after(0, lambda s=student, i=files: self.log(self.t("log_match_several", student=s, files=i)))
+        return len(several)
+
+    def log_final_check(self, valid_extensions=('.png', '.jpg', '.jpeg')):
+        """
+        After a batch: count sheets, reports and summary rows, and name each report whose sheet is gone (e.g. deleted
+        by hand) and each sheet without a report. Returns how many were found; counts that disagree otherwise count once.
+        """
+        self.ui_after(0, lambda: self.log(self.t("log_verify_counts")))
+        image_dirs = [d for d in (self.exam_folder, self.get_folder_path('success')) if d and os.path.isdir(d)]
+        images = [os.path.join(d, f) for d in image_dirs for f in os.listdir(d) if f.lower().endswith(valid_extensions)]
+
+        reports_dir = self.get_folder_path('reports')
+        if os.path.exists(reports_dir):
+            json_count = len([f for f in os.listdir(reports_dir) if f.endswith('.json')])
+            md_count = len([f for f in os.listdir(reports_dir) if f.endswith('.md')])
+        else:
+            json_count = md_count = 0
+
+        grading_data_dir = self.get_folder_path('grading_data')
+        csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
+        csv_path = os.path.join(grading_data_dir, csv_filename)
+        csv_rows = 0
+        if os.path.exists(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                    csv_rows = sum(1 for line in f) - 1  # Exclude header
+            except: pass
+
+        self.ui_after(0, lambda ti=len(images), jc=json_count, mc=md_count, cr=csv_rows:
+            self.log(self.t("log_grading_stats", ti=ti, jc=jc, mc=mc, cr=cr)))
+
+        # A report's sheet may also wait in the failed folder for another try
+        sheets = find_graded_sheets(reports_dir, image_dirs + [self.get_folder_path('failed')])
+        found = {os.path.abspath(path) for _, _, path in sheets if path}
+        missing = [(os.path.basename(j), record_image_name(data) or os.path.splitext(os.path.basename(j))[0]) for j, data, path in sheets if not path]
+        unreported = [os.path.basename(p) for p in images if os.path.abspath(p) not in found]
+        for report, image in missing:
+            self.ui_after(0, lambda r=report, i=image: self.log(self.t("log_report_image_missing", report=r, image=i)))
+        for image in unreported:
+            self.ui_after(0, lambda i=image: self.log(self.t("log_image_without_report", image=i)))
+        problems = len(missing) + len(unreported)
+        if not problems and not len(images) == json_count == md_count == csv_rows:
+            problems = 1
+        return problems
 
     def process_single_file(self, grader, rubric_text, filename, folder, is_retry, file_num=None):
         # Capture original filename before any renaming
@@ -3360,10 +3464,13 @@ class App(ctk.CTk):
                     try: shutil.copy2(src, dst)
                     except: pass
             
-            # Backup success files (if not already backed up)
+            # Backup success files (if not already backed up). A sheet renamed after grading or review is backed up
+            # under the name it was scanned with, so its scan is not copied a second time under the new name
+            originals = {os.path.basename(path): original_name(data, path)
+                         for _, data, path in find_graded_sheets(self.get_folder_path('reports'), [success_dir]) if path}
             for f in success_files:
                 src = os.path.join(success_dir, f)
-                dst = os.path.join(original_files_dir, f)
+                dst = os.path.join(original_files_dir, originals.get(f, f))
                 if not os.path.exists(dst):
                     try: shutil.copy2(src, dst)
                     except: pass
@@ -3507,51 +3614,24 @@ class App(ctk.CTk):
                             executor.shutdown(wait=True)
 
             # ===== PHASE 3: Final Verification =====
+            problems = 0
             if not self.stop_event.is_set():
                 # Wait a bit for any pending writes to complete
                 time.sleep(2)
-                
+
                 self.ui_after(0, lambda: self.log(self.t("log_regen_csv")))
                 self.regenerate_csv_from_jsons()
-                self.log_student_matches()
-
-                # Final count verification
-
-                self.ui_after(0, lambda: self.log(self.t("log_verify_counts")))
-                
-                # Count images in root + success
-                root_images = len([f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)])
-                success_dir = self.get_folder_path('success')
-                success_images = 0
-                if os.path.exists(success_dir):
-                    success_images = len([f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)])
-                total_images = root_images + success_images
-                
-                reports_dir = self.get_folder_path('reports')
-                if os.path.exists(reports_dir):
-                    json_count = len([f for f in os.listdir(reports_dir) if f.endswith('.json')])
-                    md_count = len([f for f in os.listdir(reports_dir) if f.endswith('.md')])
-                else:
-                    json_count = md_count = 0
-                
-                grading_data_dir = self.get_folder_path('grading_data')
-                csv_filename = "成绩汇总表.csv" if self.current_lang == "CN" else "Grade_Summary.csv"
-                csv_path = os.path.join(grading_data_dir, csv_filename)
-                csv_rows = 0
-                if os.path.exists(csv_path):
-                    try:
-                        with open(csv_path, 'r', encoding='utf-8-sig') as f:
-                            csv_rows = sum(1 for line in f) - 1  # Exclude header
-                    except: pass
-                
-                self.ui_after(0, lambda ti=total_images, jc=json_count, mc=md_count, cr=csv_rows:
-                    self.log(self.t("log_grading_stats", ti=ti, jc=jc, mc=mc, cr=cr)))
+                # A student on several sheets, a report without its sheet or counts that disagree are not "all done"
+                problems = self.log_student_matches() + self.log_final_check(valid_extensions)
 
             if self.stop_event.is_set():
                 self.ui_after(0, lambda: self.log(self.t("msg_stopped")))
             else:
-                self.ui_after(0, lambda: self.log(self.t("msg_finished")))
-                
+                if problems:
+                    self.ui_after(0, lambda n=problems: self.log(self.t("msg_finished_problems", count=n)))
+                else:
+                    self.ui_after(0, lambda: self.log(self.t("msg_finished")))
+
                 # Check completion again to prompt for review
                 self.ui_after(1000, self.check_completion_status)
 
@@ -3562,64 +3642,117 @@ class App(ctk.CTk):
             self.processing = False
             self.ui_after(0, lambda: self.reset_ui_state())
 
-    def open_export_dialog(self, master=None):
-        """Export (from the review window): copy graded sheets out under their students' names."""
-        master = master or self
-        if self.processing:
-            messagebox.showinfo(self.t("title_export_sheets"), self.t("msg_export_busy"), parent=master)
-            return
-        sheets = find_graded_sheets(self.get_folder_path('reports'), [self.get_folder_path('success'), self.exam_folder]) if self.exam_folder else []
-        if not any(path for _, path in sheets):
-            messagebox.showinfo(self.t("title_export_sheets"), self.t("msg_export_nothing"), parent=master)
-            return
-        ExportSheetsDialog(self, sheets, master)
+    def rename_reviewed_sheets(self):
+        """
+        When review is done: rename every graded sheet whose student is confirmed to Class-Name (e.g. 701-张三.jpg),
+        in the folder it is in, and record the new name in its report. Repeated names get _1, _2 ...; sheets whose
+        student is still to be checked keep their names. Each scan stays in the original files folder under the name
+        it was scanned with; one missing there is backed up before its sheet is renamed.
+        Returns (renamed, kept): sheets renamed now, and sheets not named after a student.
+        """
+        backup_dir = self.get_folder_path('original_files')
+        sheets, kept = [], 0
+        for json_path, data, path in find_graded_sheets(self.get_folder_path('reports'), [self.get_folder_path('success'), self.exam_folder]):
+            if not path:
+                continue
+            base = sheet_name(data.get('db_student_info') or {}) if identity_confirmed(data) else ''
+            if base:
+                sheets.append({'json': json_path, 'data': data, 'path': path, 'start': path, 'name': base + os.path.splitext(path)[1]})
+            else:
+                kept += 1
 
-    def run_export(self, pattern_key):
-        def work():
-            try:
-                dest, plan, missing = self.export_named_sheets(pattern_key)
-            except Exception as e:
-                self.ui_after(0, lambda e=str(e): self.log(self.t("log_export_failed", error=e)))
-                self.ui_after(0, lambda e=str(e): messagebox.showerror(self.t("title_error"), self.t("log_export_failed", error=e)))
+        def rename(sheet, name):
+            path, data = sheet['path'], sheet['data']
+            if name == os.path.basename(path):
                 return
-            check = sum(1 for _, _, confirmed, _ in plan if not confirmed)
-            self.ui_after(0, lambda: self.log(self.t("log_export_done", count=len(plan), check=check, folder=dest)))
-            if missing:
-                self.ui_after(0, lambda: self.log(self.t("log_export_missing", count=missing)))
+            original = original_name(data, path)
+            new_path = os.path.join(os.path.dirname(path), name)
+            try:
+                backup = os.path.join(backup_dir, original)
+                if not os.path.exists(backup):  # Never rename a sheet whose scan is not backed up
+                    os.makedirs(backup_dir, exist_ok=True)
+                    shutil.copy2(path, backup)
+                    self.log(self.t("log_original_backed_up", filename=original))
+                os.rename(path, new_path)
+                record = dict(data, original_filename=original, renamed_filename=name)
+                if name == original:
+                    del record['renamed_filename']
+                temp = sheet['json'] + '.tmp'  # A failed write must not leave the report cut short
+                try:
+                    with open(temp, 'w', encoding='utf-8') as f:
+                        json.dump(record, f, ensure_ascii=False, indent=2)
+                    os.replace(temp, sheet['json'])
+                except Exception:
+                    if os.path.exists(temp):
+                        os.remove(temp)
+                    os.rename(new_path, path)  # The report must keep pointing at the image
+                    raise
+            except Exception as e:
+                self.log(self.t("log_rename_failed", filename=os.path.basename(path), new=name, error=e))
+                return
+            sheet['path'], sheet['data'] = new_path, record
 
-            def done():
-                if messagebox.askyesno(self.t("title_export_sheets"), self.t("msg_export_done", count=len(plan), folder=dest)):
-                    self.open_path(dest)
-            self.ui_after(0, done)
-        threading.Thread(target=work, daemon=True).start()
+        with self.rename_lock:
+            folders = self._image_folders()
+            # Same name except for letter case counts as named: the file system may see the two as one
+            pending = [s for s in sheets if os.path.basename(s['path']).lower() != s['name'].lower()]
+            numbered = set()
+            while pending:
+                # A sheet whose name is free takes it; sheets waiting for a name another sheet gives up go next
+                sheet = next((s for s in pending if unique_filename(s['name'], folders, s['path']) == s['name']), None)
+                if sheet:
+                    rename(sheet, sheet['name'])
+                    pending.remove(sheet)
+                    continue
+                # Every wanted name is taken (repeated names, or two sheets that swapped students): number the first
+                # sheet; if a sheet still to be renamed holds its name, it takes that name once it is freed
+                sheet = next((s for s in pending if s['json'] not in numbered), None)
+                if sheet is None:
+                    break
+                numbered.add(sheet['json'])
+                rename(sheet, unique_filename(sheet['name'], folders, sheet['path']))
+                if not any(os.path.basename(s['path']).lower() == sheet['name'].lower() for s in pending if s is not sheet):
+                    pending.remove(sheet)
 
-    def export_named_sheets(self, pattern_key='class_name'):
+        renamed = sum(1 for s in sheets if s['path'] != s['start'])
+        if renamed:
+            self.regenerate_csv_from_jsons()  # The summary lists each sheet's current file
+        self.log(self.t("log_sheets_renamed", renamed=renamed, kept=kept))
+        return renamed, kept
+
+    def remove_sheet(self, image_path, json_path):
         """
-        Copy every graded sheet into a new folder under the export folder, named after its student
-        (or 待核对-<image> while the student is not confirmed), with a list of what each file is.
-        Original images are not moved or renamed. Returns (export folder, plan, reports without an image).
+        Take a graded sheet out of the grades, e.g. one scanned twice. Its image and its report (JSON and Markdown)
+        move to a new folder in the removed folder, laid out as in the exam folder (成功归档/..., 阅卷报告/...), so moving
+        them back restores the sheet; grading and review do not look there. The scan stays in the original files folder.
+        Returns the new folder.
         """
-        sheets = find_graded_sheets(self.get_folder_path('reports'), [self.get_folder_path('success'), self.exam_folder])
-        plan = plan_export(sheets, NAME_PATTERNS[pattern_key], self.t("export_check_prefix"))
-        export_root = self.get_folder_path('exported')
-        os.makedirs(export_root, exist_ok=True)
-        dest = os.path.join(export_root, unique_filename(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"), [export_root]))
-        os.makedirs(dest)
-        for path, name, _, _ in plan:
-            shutil.copy2(path, os.path.join(dest, name))
-
-        is_en = (self.current_lang == "EN")
-        headers = (['Exported File', 'Status', 'Class', 'Name', 'ID', 'Room', 'Seat', 'Match Method', 'Original File', 'Current File'] if is_en
-                   else ['导出文件', '状态', '班级', '姓名', '考号', '考场', '座号', '匹配方式', '原始文件', '当前文件'])
-        with open(os.path.join(dest, self.t("export_list_file")), 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for path, name, confirmed, data in plan:
-                student = data.get('db_student_info') or {}
-                writer.writerow([name, self.t("export_status_confirmed" if confirmed else "export_status_check")]
-                                + [student.get(k, '') for k in ('class', 'name', 'id', 'room', 'seat')]
-                                + [self.match_label(data), os.path.basename(data.get('original_filename') or ''), os.path.basename(path)])
-        return dest, plan, sum(1 for _, path in sheets if not path)
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                label = sheet_label(json.load(f), os.path.basename(image_path), self.t)
+        except (OSError, ValueError, AttributeError):
+            label = os.path.basename(image_path)
+        removed_root = self.get_folder_path('removed')
+        os.makedirs(removed_root, exist_ok=True)
+        dest = os.path.join(removed_root, unique_filename(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"), [removed_root]))
+        moved = []
+        with self.rename_lock:
+            try:
+                for src in (image_path, json_path, os.path.splitext(json_path)[0] + '.md'):
+                    if not os.path.exists(src):
+                        continue
+                    relative = os.path.relpath(src, self.exam_folder)
+                    target = os.path.join(dest, os.path.basename(src) if relative.startswith(os.pardir) else relative)
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.move(src, target)
+                    moved.append((src, target))
+            except Exception:
+                for src, target in reversed(moved):  # A sheet is removed whole or not at all
+                    shutil.move(target, src)
+                raise
+        self.regenerate_csv_from_jsons()
+        self.log(self.t("log_sheet_removed", sheet=label, folder=os.path.relpath(dest, self.exam_folder)))
+        return dest
 
     def open_review_window(self):
         if not self.exam_folder:
@@ -3628,9 +3761,15 @@ class App(ctk.CTk):
             
         # Ensure JSONs exist (Legacy Support)
         self.ensure_jsons_exist()
-        
+
+        # Sheets graded before the roster was loaded (or read correctly) are matched to it now
         try:
-            ReviewWindow(self, self.exam_folder, self.student_manager, self.on_review_save, 
+            self.rematch_students()
+        except Exception as e:
+            self.log(self.t("msg_error", error=e))
+
+        try:
+            ReviewWindow(self, self.exam_folder, self.student_manager, self.on_review_save,
                          lang=self.current_lang, translations=TRANSLATIONS)
         except Exception as e:
             self.log(self.t("msg_error", error=e))
@@ -4006,58 +4145,6 @@ class TemplateConfirmDialog(ctk.CTkToplevel):
         new_desc = self.textbox.get("1.0", "end-1c")
         self.on_confirm(new_desc)
         self.destroy()
-
-
-class ExportSheetsDialog(ctk.CTkToplevel):
-    """Choose how exported sheets are named, preview the names, then export."""
-    def __init__(self, parent, sheets, master=None):
-        master = master or parent
-        super().__init__(master)
-        self.parent = parent
-        self.sheets = sheets
-        self.title(parent.t("title_export_sheets"))
-        self.geometry("560x320")
-
-        # Center window over the window it was opened from
-        self.update_idletasks()
-        x = master.winfo_x() + (master.winfo_width() // 2) - 280
-        y = master.winfo_y() + (master.winfo_height() // 2) - 160
-        self.geometry(f"+{x}+{y}")
-
-        self.patterns = {parent.t(f"export_pattern_{key}"): key for key in NAME_PATTERNS}
-        ctk.CTkLabel(self, text=parent.t("lbl_export_pattern"), font=("Arial", 14, "bold")).pack(padx=20, pady=(16, 4), anchor="w")
-        self.combo_pattern = ctk.CTkComboBox(self, values=list(self.patterns), state="readonly", width=260, command=lambda _: self.update_preview())
-        self.combo_pattern.set(next(iter(self.patterns)))
-        self.combo_pattern.pack(padx=20, anchor="w")
-
-        self.lbl_summary = ctk.CTkLabel(self, text="", justify="left", wraplength=520)
-        self.lbl_summary.pack(padx=20, pady=(12, 4), anchor="w")
-        self.lbl_examples = ctk.CTkLabel(self, text="", justify="left", wraplength=520, text_color=("gray40", "gray60"))
-        self.lbl_examples.pack(padx=20, anchor="w")
-        ctk.CTkLabel(self, text=parent.t("lbl_export_note", folder=parent.get_folder_path('exported')), justify="left",
-                     wraplength=520, text_color=("gray40", "gray60")).pack(padx=20, pady=(8, 0), anchor="w")
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(side="bottom", fill="x", padx=20, pady=16)
-        self.btn_confirm = ctk.CTkButton(btn_frame, text=parent.t("btn_export_confirm"), fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER, command=self.confirm)
-        self.btn_confirm.pack(side="right")
-        ctk.CTkButton(btn_frame, text=parent.t("btn_cancel"), fg_color=Theme.TEXT_MUTED_LIGHT, command=self.destroy).pack(side="right", padx=10)
-
-        self.update_preview()
-        self.transient(master)
-        self.grab_set()
-
-    def update_preview(self):
-        t = self.parent.t
-        plan = plan_export(self.sheets, NAME_PATTERNS[self.patterns[self.combo_pattern.get()]], t("export_check_prefix"))
-        confirmed = sum(1 for _, _, ok, _ in plan if ok)
-        self.lbl_summary.configure(text=t("lbl_export_summary", total=len(plan), confirmed=confirmed, check=len(plan) - confirmed, prefix=t("export_check_prefix")))
-        self.lbl_examples.configure(text=t("lbl_export_examples", names="、".join(name for _, name, _, _ in plan[:3])))
-
-    def confirm(self):
-        pattern_key = self.patterns[self.combo_pattern.get()]
-        self.destroy()
-        self.parent.run_export(pattern_key)
 
 
 if __name__ == "__main__":

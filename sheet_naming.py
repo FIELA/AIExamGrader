@@ -4,22 +4,16 @@
 # Public forks allowed solely for PRs (delete within 14 days after PR merged, rejected, or closed).
 # Commercial licensing inquiries: nicofiela@outlook.com. See LICENSE file for full terms.
 
-"""Name graded answer sheets after their students for export; the original images are never touched."""
+"""Name graded answer sheets after their students (Class-Name) once review is done; the scans stay backed up."""
 
 import json
 import os
 import re
 
 from report_files import record_image_name
-from student_manager import REVIEW_METHODS
+from student_manager import REVIEW_METHODS, student_key
 
-# Name formats offered when exporting
-NAME_PATTERNS = {
-    'class_name': '{班级}-{姓名}',
-    'class_name_id': '{班级}-{姓名}-{考号}',
-    'id_name': '{考号}-{姓名}',
-    'room_seat_name': '{考场}-{座号}-{姓名}',
-}
+SHEET_NAME = '{班级}-{姓名}'  # e.g. 701-张三.jpg
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')
 
 
@@ -32,7 +26,7 @@ def identity_confirmed(data):
     return method not in REVIEW_METHODS or data.get('review_count', 0) > 0
 
 
-def sheet_name(student, pattern):
+def sheet_name(student, pattern=SHEET_NAME):
     """File name without extension for a student, e.g. 701-张三; separators left by empty fields are dropped."""
     fields = {'班级': student.get('class'), '姓名': student.get('name'), '考号': student.get('id'),
               '考场': student.get('room'), '座号': student.get('seat')}
@@ -41,16 +35,22 @@ def sheet_name(student, pattern):
     return re.sub(r'([-_\s])[-_\s]+', r'\1', name).strip('-_ .')
 
 
+def original_name(data, image_name=''):
+    """Name the sheet was scanned, and backed up to the original files folder, with."""
+    return os.path.basename(str(data.get('original_filename') or '')) or os.path.basename(image_name)
+
+
 def find_graded_sheets(reports_dir, image_dirs):
-    """(report data, image path or None) for every report; the image is looked for in image_dirs."""
+    """(report JSON path, report data, image path or None) for every report; the image is looked for in image_dirs."""
     sheets = []
     if not reports_dir or not os.path.isdir(reports_dir):
         return sheets
     for report in sorted(os.listdir(reports_dir)):
         if not report.endswith('.json'):
             continue
+        json_path = os.path.join(reports_dir, report)
         try:
-            with open(os.path.join(reports_dir, report), 'r', encoding='utf-8') as f:
+            with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except (OSError, ValueError):
             continue
@@ -60,29 +60,24 @@ def find_graded_sheets(reports_dir, image_dirs):
         # Older reports without that record are named after their image
         names = [image] if image else [os.path.splitext(report)[0] + ext for ext in IMAGE_EXTENSIONS]
         path = next((os.path.join(d, n) for n in names for d in image_dirs if d and os.path.isfile(os.path.join(d, n))), None)
-        sheets.append((data, path))
+        sheets.append((json_path, data, path))
     return sheets
 
 
-def plan_export(sheets, pattern, check_prefix):
-    """
-    Export file name for each sheet that has an image: the student's name when the student is confirmed,
-    otherwise '<check_prefix>-<image name>'. Repeated names get _1, _2 ... (ignoring letter case, as
-    Windows and macOS do). Returns [(image path, export name, confirmed, report data)].
-    """
-    plan, used = [], set()
-    for data, path in sheets:
-        if not path:
-            continue
-        stem, ext = os.path.splitext(os.path.basename(path))
-        confirmed = identity_confirmed(data)
-        base = sheet_name(data.get('db_student_info') or {}, pattern) if confirmed else ''
-        if not base:
-            confirmed, base = False, f"{check_prefix}-{stem}"
-        name, counter = f"{base}{ext}", 1
-        while name.lower() in used:
-            name = f"{base}_{counter}{ext}"
-            counter += 1
-        used.add(name.lower())
-        plan.append((path, name, confirmed, data))
-    return plan
+def students_on_several_sheets(reports_dir):
+    """{student key: [(report JSON path, report data), ...]} for each known student bound to more than one report."""
+    groups = {}
+    for json_path, data, _ in find_graded_sheets(reports_dir, []):
+        student = data.get('db_student_info') or {}
+        if student.get('name') not in (None, '', '未知'):
+            groups.setdefault(student_key(student), []).append((json_path, data))
+    return {key: sheets for key, sheets in groups.items() if len(sheets) > 1}
+
+
+def sheet_label(data, image, t):
+    """A sheet in a message, with its score and whether it was reviewed, e.g. 701-张三.jpg（54 分，未复审）."""
+    score = data.get('total_score', '-')
+    if isinstance(score, float) and score.is_integer():
+        score = int(score)
+    status = t('status_reviewed') if data.get('review_count', 0) else t('status_unreviewed')
+    return t('sheet_label', file=image, score=score, status=status)
