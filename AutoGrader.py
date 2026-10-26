@@ -39,6 +39,9 @@ from grader_engine import AIGraderEngine
 from rubric_loader import RubricLoader
 from translations import TRANSLATIONS
 from review_window import ReviewWindow
+import score_marks
+from score_marks_dialog import CHAIN, MANAGE, ScoreMarksDialog
+from score_marks_service import MarksSourceError, ScoreMarksService
 from theme import Theme
 from PIL import Image
 
@@ -94,6 +97,7 @@ class App(ctk.CTk):
         self.processing = False
         self.write_lock = threading.RLock()  # Use RLock for reentrant locking
         self.rename_lock = threading.Lock()  # Picking a free image name and renaming must not interleave
+        self.score_marks = ScoreMarksService(self)  # Scores written in red on the graded sheets
         self.completed_count = 0
 
         self.total_files = 0
@@ -341,13 +345,15 @@ class App(ctk.CTk):
             else:
                 self.icons[name] = None
 
-    def get_folder_path(self, key):
+    def get_folder_path(self, key, exam_folder=None):
         """
         Get the path for a specific folder type (grading_data, reports, etc.)
         Checks for existing folders in both languages, defaults to current language.
         key: 'grading_data', 'original_files', 'reports', 'success', 'failed', 'removed'
+        exam_folder: another exam than the open one (work queued for an exam keeps writing to that exam)
         """
-        if not self.exam_folder: return None
+        exam_folder = exam_folder or self.exam_folder
+        if not exam_folder: return None
 
         # Define possible names (EN, CN)
         # We could load from translations, but hardcoding here ensures we know what to look for
@@ -365,7 +371,7 @@ class App(ctk.CTk):
         
         # 1. Check if any exist
         for name in possible_names:
-            path = os.path.join(self.exam_folder, name)
+            path = os.path.join(exam_folder, name)
             if os.path.exists(path):
                 return path
                 
@@ -374,10 +380,10 @@ class App(ctk.CTk):
         trans_key = f"dir_{key}"
         folder_name = self.t(trans_key)
         # Fallback if translation missing (shouldn't happen if translations.py updated)
-        if folder_name == trans_key: 
+        if folder_name == trans_key:
             folder_name = possible_names[0] # Default to EN
-            
-        return os.path.join(self.exam_folder, folder_name)
+
+        return os.path.join(exam_folder, folder_name)
 
     def setup_ui(self):
         # Handle window close
@@ -541,8 +547,8 @@ class App(ctk.CTk):
         self.controls_card = ctk.CTkFrame(self.dashboard_frame, corner_radius=12)
         self.controls_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         
-        # Configure grid for equal button widths (5 buttons)
-        for i in range(5):
+        # Configure grid for equal button widths (6 buttons)
+        for i in range(6):
             self.controls_card.grid_columnconfigure(i, weight=1)
 
         # Ultra Compact buttons: height 40, pady 5
@@ -560,6 +566,9 @@ class App(ctk.CTk):
         
         self.btn_regrade_obj = ctk.CTkButton(self.controls_card, text=self.t("btn_regrade_obj"), image=self.icons.get("refresh"), fg_color="#7C3AED", hover_color="#6D28D9", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.regrade_all_objective, anchor="center")
         self.btn_regrade_obj.grid(row=0, column=4, padx=4, pady=5, sticky="ew")
+
+        self.btn_score_marks = ctk.CTkButton(self.controls_card, text=self.t("btn_score_marks"), image=self.icons.get("document"), fg_color="#B91C1C", hover_color="#991B1B", text_color="#FFFFFF", height=40, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=8, command=self.open_score_marks_dialog, anchor="center")
+        self.btn_score_marks.grid(row=0, column=5, padx=4, pady=5, sticky="ew")
 
 
         # Stats
@@ -769,6 +778,7 @@ class App(ctk.CTk):
             self.exam_folder = profile_data["exam_folder"]
             if os.path.exists(self.exam_folder):
                 self.lbl_folder_status.configure(text=os.path.basename(self.exam_folder), text_color=("green", "lightgreen"))
+                self.score_marks.scan_async()  # Scores left unwritten when the app last closed
             else:
                 self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
         else:
@@ -858,7 +868,8 @@ class App(ctk.CTk):
         self.btn_stop.configure(text=self.t("btn_stop"))
         self.btn_review.configure(text=self.t("btn_review"))
         self.btn_regrade_obj.configure(text=self.t("btn_regrade_obj"))
-        
+        self.btn_score_marks.configure(text=self.t("btn_score_marks"))
+
         self.update_progress_ui() # Update progress text
 
     def on_provider_change(self, choice):
@@ -1045,6 +1056,7 @@ class App(ctk.CTk):
         if path:
             self.exam_folder = path
             self.lbl_folder_status.configure(text=os.path.basename(path), text_color="#106A38")
+            self.score_marks.scan_async()  # Scores left unwritten when this exam was last open
             self.check_ready_and_verify()
 
     def load_student_list(self):
@@ -1474,9 +1486,10 @@ class App(ctk.CTk):
         self.log(self.t("log_checking_answer_key"))
         
         # Check and generate answer key if needed (BEFORE grading)
-        # Chain: PDF conversion -> Answer Key -> Layout -> CSV -> Grading
+        # Chain: PDF conversion -> Answer Key -> Layout -> Score positions -> CSV -> Grading
         self.ensure_rubric_and_run(lambda: self.ensure_answer_key_and_run(
-            lambda: self.ensure_layout_and_run(lambda: self.ensure_csv_and_run(self._run_grading_process))))
+            lambda: self.ensure_layout_and_run(lambda: self.ensure_score_marks_and_run(
+                lambda: self.ensure_csv_and_run(self._run_grading_process)))))
     
     def ensure_answer_key_and_run(self, callback):
         """Ensure answer key exists before running callback"""
@@ -1899,6 +1912,164 @@ class App(ctk.CTk):
             self.ui_after(100, callback) # Run callback
             
         TemplateConfirmDialog(self, layout_description, on_confirm)
+
+    # --- Scores written on the graded sheets (score_marks) ---
+
+    def ensure_score_marks_and_run(self, callback):
+        """Before grading: where the scores go on the sheets, once per exam (skipping asks again next time)."""
+        template, error = self.score_marks.load_template()
+        if error:
+            self.log(self.t("log_marks_template_damaged", error=error))
+            callback()
+            return
+        if template and template.get('status') in (score_marks.ENABLED, score_marks.PENDING, score_marks.DISABLED):
+            callback()
+            return
+        self.open_score_marks_dialog(CHAIN, after=callback)
+
+    def _load_answer_key_quietly(self):
+        if getattr(self, 'answer_key', None):
+            return self.answer_key
+        path = os.path.join(self.get_folder_path('grading_data'), 'answer_key.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def score_marks_samples(self, reports):
+        """
+        Scans to place the scores on: the graded sheets' scans, or before any grading the scans waiting to be graded.
+        Sheets graded before scans were backed up have only their graded images, usable while no scores were ever
+        written on them (the dialog only reads its samples).
+        """
+        if reports:
+            paths = [self.score_marks.original_path(self.exam_folder, data) for _, data in reports]
+            if not any(paths) and not self.score_marks.marks_ever_written():
+                paths = [self.score_marks.archive_path(self.exam_folder, data) for _, data in reports]
+        else:
+            paths = [os.path.join(self.exam_folder, f) for f in sorted(os.listdir(self.exam_folder))
+                     if f.lower().endswith(('.png', '.jpg', '.jpeg')) and not f.startswith('.')]
+        return list(dict.fromkeys(p for p in paths if p))[:40]
+
+    def open_score_marks_dialog(self, mode=MANAGE, after=None):
+        """Set, change, pause or undo the score positions of the open exam (after runs once the dialog closes)."""
+        after = after or (lambda: None)
+        if not self.exam_folder or not os.path.isdir(self.exam_folder):
+            messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
+            return
+        if mode == MANAGE and self.processing:
+            messagebox.showinfo(self.t("title_score_marks"), self.t("msg_marks_busy"))
+            return
+        reports = self.score_marks.reports()
+        datas = [data for _, data in reports]
+        template, error = self.score_marks.load_template()
+        if error:
+            self.log(self.t("log_marks_template_damaged", error=error))
+        samples = self.score_marks_samples(reports)
+        if not samples:
+            messagebox.showinfo(self.t("title_score_marks"), self.t("msg_marks_no_samples"))
+            after()
+            return
+        if template is None:
+            items = score_marks.items_from_reports(datas) if datas else \
+                score_marks.items_from_answer_key(self._load_answer_key_quietly())
+            template = score_marks.new_template(items, self.current_lang, list(score_marks.normalized_size(samples[0])))
+        max_scores = {}
+        for data in datas:
+            for item in data.get('details') or []:
+                if isinstance(item, dict) and score_marks.is_number(item.get('max_score')):
+                    qid = score_marks.normalize_qid(item.get('question_id'))
+                    max_scores[qid] = max(max_scores.get(qid, 0), item['max_score'])
+
+        def locate(path, tpl):
+            engine = self._create_grader()
+            raw = engine.locate_marks(path, tpl['items']['subjective'], bool(tpl['items']['objective']))
+            return score_marks.parse_boxes(raw, tpl['items']['subjective'])
+
+        def on_done(action, tpl):
+            try:
+                if action == 'enable':
+                    # A list guessed from the answer key waits for the first report to confirm it
+                    tpl['status'] = score_marks.ENABLED if datas else score_marks.PENDING
+                    tpl.pop('pending_diff', None)
+                    self.score_marks.save_template(tpl)
+                    self.log(self.t("log_marks_enabled" if datas else "log_marks_pending"))
+                    if datas:
+                        self.offer_legacy_backup()
+                elif action == 'draft':
+                    self.score_marks.save_template(dict(tpl, status=score_marks.DRAFT))
+                    self.log(self.t("log_marks_draft"))
+                elif action == 'disable':
+                    self.score_marks.save_template(dict(tpl, status=score_marks.DISABLED))
+                    self.log(self.t("log_marks_disabled"))
+                elif action == 'pause':
+                    self.score_marks.pause()
+                    self.log(self.t("log_marks_paused"))
+                elif action == 'restore':
+                    self.restore_marked_sheets()
+            except Exception as e:
+                self.log(self.t("msg_error", error=e))
+                messagebox.showerror(self.t("title_error"), self.t("msg_error", error=e))
+            after()
+
+        try:
+            ScoreMarksDialog(self, self.t, template, samples, mode, on_done, max_scores=max_scores, locate=locate,
+                             ui_after=self.ui_after)
+        except Exception as e:  # The scores are an extra: grading goes on without them
+            self.log(self.t("msg_error", error=e))
+            after()
+
+    def offer_legacy_backup(self):
+        """
+        Sheets graded before scans were backed up have no scan to draw on. Their graded images are backed up as scans
+        only when the teacher confirms they carry no scores (and only images without this feature's marker).
+        """
+        candidates = []
+        backup_dir = self.get_folder_path('original_files')
+        for _, data in self.score_marks.reports():
+            name = os.path.basename(str(data.get('original_filename') or ''))
+            archive = self.score_marks.archive_path(self.exam_folder, data)
+            if name and archive and not os.path.exists(os.path.join(backup_dir, name)) and not score_marks.read_marker(archive):
+                candidates.append((archive, name))
+        if not candidates:
+            return
+        files = "、".join(os.path.basename(a) for a, _ in candidates[:20]) + ("…" if len(candidates) > 20 else "")
+        if not messagebox.askyesno(self.t("title_score_marks"), self.t("msg_marks_legacy_backup", count=len(candidates), files=files)):
+            return
+        os.makedirs(backup_dir, exist_ok=True)
+        done = 0
+        for archive, name in candidates:
+            target = os.path.join(backup_dir, name)
+            if not os.path.exists(target):
+                shutil.copy2(archive, target)
+                done += 1
+        self.log(self.t("log_marks_legacy_backed_up", count=done))
+        self.score_marks.scan_async()
+
+    def restore_marked_sheets(self):
+        """Undo the marks: the listed sheets get their scans back (see ScoreMarksService.restore)."""
+        sheets = self.score_marks.marked_sheets()
+        if not sheets:
+            messagebox.showinfo(self.t("title_score_marks"), self.t("msg_marks_restore_none"))
+            return
+        files = "、".join(name for _, name in sheets[:20]) + ("…" if len(sheets) > 20 else "")
+        if not messagebox.askyesno(self.t("title_score_marks"), self.t("msg_marks_restore_confirm", count=len(sheets), files=files)):
+            return
+
+        def done(restored, skipped):
+            details = "\n".join(f"{image}：{reason}" for image, reason in skipped[:20])
+            extra = self.t("msg_marks_restore_skipped", count=len(skipped), details=details) if skipped else ""
+            messagebox.showinfo(self.t("title_score_marks"), self.t("msg_marks_restore_done", restored=len(restored), skipped=extra))
+        self.score_marks.restore([json_path for json_path, _ in sheets], done)
+
+    def score_marks_after_review(self):
+        """After the whole review: catch up on the marks (the sheets were just renamed), or say how to start them."""
+        template, error = self.score_marks.load_template()
+        if template is None and not error:
+            return self.t("msg_marks_hint_review_done")
+        self.score_marks.scan_async(report=True)
+        return ""
 
     def toggle_pause(self):
         if self.pause_event.is_set():
@@ -2797,10 +2968,9 @@ class App(ctk.CTk):
                         data['review_logs'] = []
                     data['review_logs'].append(log_entry)
                     
-                    # Save JSON
-                    with open(json_path, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                    
+                    # Save JSON; the image's scores follow
+                    self.score_marks.commit_report(json_path, data)
+
                     # Update Markdown
                     md_path = json_path.replace('.json', '.md')
                     db_info = data.get('db_student_info', {})
@@ -2823,7 +2993,8 @@ class App(ctk.CTk):
         self.ui_after(0, lambda u=updated_count: messagebox.showinfo(self.t("title_success"), f"Re-grading complete! Updated {u} students."))
 
 
-    def save_markdown(self, data, original_filename, db_student_info, renamed_filename=None, report_prefix=None):
+    def save_markdown(self, data, original_filename, db_student_info, renamed_filename=None, report_prefix=None, enqueue_marks=False):
+        """Save a sheet's report (Markdown, JSON, summary row); returns the JSON path. With enqueue_marks its image's scores are redrawn."""
         exam_room = str(db_student_info.get('room', '未知'))
         seat_no = str(db_student_info.get('seat', '未知'))
         image_name = renamed_filename or original_filename
@@ -2868,9 +3039,8 @@ class App(ctk.CTk):
         if renamed_filename:
             data_to_save['renamed_filename'] = renamed_filename
         data_to_save['db_student_info'] = db_student_info
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-            
+        self.score_marks.commit_report(json_path, data_to_save, enqueue=enqueue_marks)
+
         # Calculate objective question statistics
         details = data.get('details', [])
         objective_q = [x for x in details if "客观" in x.get('type', '') or "选择" in x.get('type', '')]
@@ -2956,8 +3126,9 @@ class App(ctk.CTk):
             
             summary_data[f"Q{qid} Answer"] = ans
             summary_data[f"Q{qid} Score"] = score
-        
+
         self.write_summary_csv(summary_data)
+        return json_path
 
     def regrade_single_file(self, image_path):
         """
@@ -2984,20 +3155,31 @@ class App(ctk.CTk):
                 if not self._pdf_answer_key_matches(key_path):
                     raise ValueError(self.t("msg_pdf_answers_stale"))
             
-            # 1. Process Image
-            result = self.grader_engine.grade_exam(rubric_text, image_path, self.layout_description)
-            
+            # 1. Process Image: once this exam has had scores written on its sheets, the scan is graded, not the
+            # graded image, which its report says how to find
+            filename = os.path.basename(image_path)
+            reports_dir = self.get_folder_path('reports')
+            earlier = find_report(reports_dir, filename, candidate_prefixes({}, filename))
+            earlier_data = None
+            if earlier:
+                with open(earlier, 'r', encoding='utf-8') as f:
+                    earlier_data = json.load(f)
+            try:
+                source = self.score_marks.model_source(image_path, earlier_data)
+            except MarksSourceError as e:
+                self.log(str(e))
+                return False, str(e)
+            result = self.grader_engine.grade_exam(rubric_text, source, self.layout_description)
+
             if 'error' in result:
                 self.log(self.t("log_regrade_error", error=result['error']))
                 return False, result['error']
-                
-            # 2. Resolve Student Info
-            filename = os.path.basename(image_path)
+
+            # 2. Resolve Student Info (by the graded image's name, not the scan's)
             student_info, result['student_match'] = self.student_manager.resolve_student(filename, result)
 
             # Keep this sheet's own report, file names and any student chosen for it in review
             original_filename, renamed_filename, report_prefix = filename, None, None
-            reports_dir = self.get_folder_path('reports')
             report_path = find_report(reports_dir, filename, candidate_prefixes(student_info, filename))
             if report_path:
                 with open(report_path, 'r', encoding='utf-8') as f:
@@ -3018,9 +3200,10 @@ class App(ctk.CTk):
             # The 缺 (absent) mark is part of the name the sheet was scanned with
             student_info['is_absent'] = any(StudentManager.parse_room_seat(n)[2] for n in (filename, original_filename))
 
-            # 3. Save Report (Overwrites existing)
-            self.save_markdown(result, original_filename, student_info, renamed_filename, report_prefix=report_prefix)
-            
+            # 3. Save Report (Overwrites existing); the image's scores follow
+            self.save_markdown(result, original_filename, student_info, renamed_filename, report_prefix=report_prefix,
+                               enqueue_marks=True)
+
             self.log(self.t("log_regrade_complete", filename=filename))
             
             # Return success
@@ -3386,7 +3569,7 @@ class App(ctk.CTk):
             with self.write_lock:
                 # Use original_filename_before_rename for the record
                 renamed_file = filename if filename != original_filename_before_rename else None
-                self.save_markdown(result, original_filename_before_rename, student_info, renamed_file)
+                json_path = self.save_markdown(result, original_filename_before_rename, student_info, renamed_file)
                 
                 # Log Saved Status
                 self.ui_after(0, lambda fn=filename: self.log(self.t("log_json_saved", filename=fn)))
@@ -3404,7 +3587,8 @@ class App(ctk.CTk):
             try:
                 final_dest = os.path.join(success_dir, filename)
                 shutil.move(image_path, final_dest)
-                # self.log(f"Moved to success: {filename}")
+                # Only a sheet actually in the success folder gets its scores written
+                self.score_marks.enqueue(json_path)
             except Exception as e:
                 self.log(f"⚠️ Failed to move to success: {e}")
 
@@ -3472,6 +3656,9 @@ class App(ctk.CTk):
                 src = os.path.join(success_dir, f)
                 dst = os.path.join(original_files_dir, originals.get(f, f))
                 if not os.path.exists(dst):
+                    if not self.score_marks.may_back_up(src):  # It may carry scores: never a scan
+                        self.ui_after(0, lambda fn=f: self.log(self.t("log_marks_backup_skipped", image=fn)))
+                        continue
                     try: shutil.copy2(src, dst)
                     except: pass
 
@@ -3523,8 +3710,16 @@ class App(ctk.CTk):
                 
                 for f in success_files:
                     if f in files_needing_work:
-                        # Move back to root
+                        # Move back to root, as its scan: a graded image that may carry scores is never graded
                         src = os.path.join(success_dir, f)
+                        mode, name = self.score_marks.recover_for_regrading(src)
+                        if mode == 'copied':
+                            pending_files.append(name)
+                            self.log(self.t("log_marks_recovered", image=f, original=name))
+                            continue
+                        if mode is None:
+                            self.log(self.t("log_marks_recover_manual", image=f))
+                            continue
                         dst = os.path.join(self.exam_folder, f)
                         try:
                             shutil.move(src, dst)
@@ -3670,9 +3865,12 @@ class App(ctk.CTk):
             try:
                 backup = os.path.join(backup_dir, original)
                 if not os.path.exists(backup):  # Never rename a sheet whose scan is not backed up
-                    os.makedirs(backup_dir, exist_ok=True)
-                    shutil.copy2(path, backup)
-                    self.log(self.t("log_original_backed_up", filename=original))
+                    if self.score_marks.may_back_up(path):
+                        os.makedirs(backup_dir, exist_ok=True)
+                        shutil.copy2(path, backup)
+                        self.log(self.t("log_original_backed_up", filename=original))
+                    else:  # The graded image may carry scores, so it cannot stand in for the scan
+                        self.log(self.t("log_marks_backup_skipped", image=os.path.basename(path)))
                 os.rename(path, new_path)
                 record = dict(data, original_filename=original, renamed_filename=name)
                 if name == original:
@@ -3767,6 +3965,7 @@ class App(ctk.CTk):
             self.rematch_students()
         except Exception as e:
             self.log(self.t("msg_error", error=e))
+        self.score_marks.scan_async()  # The review shows each sheet with its current scores written on it
 
         try:
             ReviewWindow(self, self.exam_folder, self.student_manager, self.on_review_save,
@@ -3812,8 +4011,7 @@ class App(ctk.CTk):
             
         json_path = os.path.join(reports_dir, f"{filename_prefix}.json")
         try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.score_marks.commit_report(json_path, data)  # The image's scores follow
         except Exception as e:
             print(f"Error saving JSON in on_review_save: {e}")
             

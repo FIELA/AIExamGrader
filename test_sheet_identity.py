@@ -13,6 +13,7 @@ from PIL import Image
 from AutoGrader import App
 from report_files import find_report, unique_report_prefix
 from review_window import ReviewWindow
+from score_marks_service import ScoreMarksService
 from student_manager import StudentManager
 
 ROSTER = [
@@ -49,6 +50,7 @@ class SheetApp:
         self.stop_event = threading.Event()
         self.write_lock = threading.RLock()
         self.rename_lock = threading.Lock()
+        self.score_marks = ScoreMarksService(self)  # As App sets it up: reports are saved through it
         self.completed_count = self.session_completed_count = self.total_files = 0
         self.logs, self.csv_rows = [], []
 

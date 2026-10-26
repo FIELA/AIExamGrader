@@ -19,6 +19,7 @@ from tkinter import messagebox
 import threading
 from theme import Theme
 from report_files import build_report_index, candidate_prefixes, find_report, record_image_name, unique_report_prefix
+from score_marks_service import write_json_atomic
 from sheet_naming import original_name, sheet_label, students_on_several_sheets
 from student_manager import REVIEW_METHODS, UNSIGNED, student_key
 
@@ -198,6 +199,38 @@ class ReviewWindow(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         # Typing while a confirmed sheet counts down means the teacher is still editing it
         self.bind("<KeyPress>", lambda e: self.cancel_advance(restore=True), add="+")
+        # The scores written on a sheet's image appear once drawn (score_marks_service)
+        service = getattr(self.parent_app, 'score_marks', None)
+        if service:
+            service.add_listener(self.on_marks_published)
+
+    def destroy(self):
+        service = getattr(self.parent_app, 'score_marks', None)
+        if service:
+            service.remove_listener(self.on_marks_published)
+        super().destroy()
+
+    @staticmethod
+    def read_image(path):
+        """The image in memory, with its file closed again (the scores may be redrawn onto it meanwhile)."""
+        with Image.open(path) as im:
+            im.load()
+            return im.copy()
+
+    def on_marks_published(self, json_path):
+        """Show the sheet's newly drawn scores if it is still the one on screen, keeping the zoom and scrolling."""
+        if not self.winfo_exists() or self.view_mode != 'image' or not self.current_json_path or not self.image_files:
+            return
+        if os.path.abspath(self.current_json_path) != os.path.abspath(json_path):
+            return
+        try:
+            self.current_image = self.read_image(self.image_files[self.current_index])
+        except Exception:
+            return
+        x, y = self.canvas.xview()[0], self.canvas.yview()[0]
+        self.redraw_image()
+        self.canvas.xview_moveto(x)
+        self.canvas.yview_moveto(y)
 
     def t(self, key, **kwargs):
         """Translate helper"""
@@ -659,6 +692,11 @@ class ReviewWindow(ctk.CTkToplevel):
         for key, sheets in students_on_several_sheets(self.reports_dir).items():
             files = "、".join(sheet_label(data, record_image_name(data) or os.path.basename(path), self.t) for path, data in sheets)
             message += "\n\n" + self.t("msg_student_several_sheets", student=f"{key[0]}({key[1]})", count=len(sheets), files=files)
+        # The scores on the images: caught up now that the sheets have their final names, or how to start them
+        if hasattr(app, 'score_marks_after_review'):
+            hint = app.score_marks_after_review()
+            if hint:
+                message += "\n\n" + hint
         messagebox.showinfo(self.t("title_success"), message, parent=app)
 
     def prev_student(self):
@@ -865,7 +903,7 @@ class ReviewWindow(ctk.CTkToplevel):
             
             if os.path.exists(img_path):
                 try:
-                    self.current_image = Image.open(img_path)
+                    self.current_image = self.read_image(img_path)
                     
                     # Force canvas to update its layout
                     self.canvas.update_idletasks()
@@ -1635,7 +1673,8 @@ class ReviewWindow(ctk.CTkToplevel):
             self.current_data['absence_confirmed'] = False
 
         first_review = self.current_data.get('review_count', 0) == 0
-        self.save_to_disk()
+        if not self.save_to_disk():
+            return  # Not saved: stay on this sheet
         if first_review:
             # Leave the confirmed score on screen for a moment before moving on
             self.show_confirmed_result()
@@ -1704,9 +1743,8 @@ class ReviewWindow(ctk.CTkToplevel):
                      self.current_data['total_score'] = sub_sum
                  else:
                      self.current_data['total_score'] = sub_sum + legacy_obj
-        
-        self.save_to_disk()
-        return True
+
+        return self.save_to_disk()  # Not saved: the step stays open
 
     def next_step(self):
         if self.steps[self.current_step_index]['type'] == 'info' and not self.student_selected():
@@ -1840,10 +1878,14 @@ class ReviewWindow(ctk.CTkToplevel):
         except: pass
 
     def save_to_disk(self):
-        if not self.current_data: return
-        
+        """
+        Save the current sheet's report (the scores on its graded image follow it), then its Markdown and summary row.
+        Returns False, keeping the review count and log as they were, when the report could not be saved.
+        """
+        if not self.current_data: return False
+
         self.update_score_display()
-        
+
         # 1. Save to JSON & MD
         # Write back to the report this sheet was loaded from: binding another student must neither
         # leave this report behind nor overwrite the report of that student's own sheet
@@ -1871,6 +1913,12 @@ class ReviewWindow(ctk.CTkToplevel):
                 self.report_index[image_name] = json_path
         md_path = os.path.splitext(json_path)[0] + ".md"
         
+        # What to go back to if the report cannot be written. Restored in place: the steps hold the report's items,
+        # and the scores typed stay on screen
+        saved_fields = ('review_count', 'confirm_absence', 'review_logs')
+        unsaved = ({k: copy.deepcopy(self.current_data[k]) for k in saved_fields if k in self.current_data},
+                   copy.deepcopy(getattr(self, 'original_data', None) or self.current_data))
+
         # Increment Review Count
         current_count = self.current_data.get('review_count', 0)
         self.current_data['review_count'] = current_count + 1
@@ -1932,16 +1980,27 @@ class ReviewWindow(ctk.CTkToplevel):
         # ------------------------------------
         
         try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(self.current_data, f, ensure_ascii=False, indent=2)
+            service = getattr(self.parent_app, 'score_marks', None)
+            if service:
+                service.commit_report(json_path, self.current_data)
+            else:
+                write_json_atomic(json_path, self.current_data)
         except Exception as e:
-            print(f"Error saving JSON: {e}")
-        
+            fields, self.original_data = unsaved
+            for key in saved_fields:
+                if key in fields:
+                    self.current_data[key] = fields[key]
+                else:
+                    self.current_data.pop(key, None)
+            messagebox.showerror(self.t("title_error"), self.t("msg_review_save_failed", error=e), parent=self)
+            return False
+
         # 2. Regenerate Markdown file
         self.update_markdown_file(md_path)
-        
+
         # 3. Update CSV row directly
         self.update_csv_row()
+        return True
             
     def update_markdown_file(self, md_path):
         """Regenerate markdown file from current data"""
