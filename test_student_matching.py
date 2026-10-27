@@ -209,10 +209,30 @@ class TestMatchingFlow(unittest.TestCase):
         data = self.report('IMG_0003.json')
         self.assertEqual((data['db_student_info']['name'], data['student_match']['method']), ('李四', 'manual'))
 
+    def test_review_matches_sheets_graded_without_a_usable_roster(self):
+        # Graded while the roster could not be read: every sheet is unmatched
+        app = self.grade({"IMG_0001.jpg": sheet('张三', '701'), "IMG_0002.jpg": sheet('李 四', '7(1)班'), "IMG_0003.jpg": sheet('王小名', '701')}, students=[])
+        self.assertEqual({self.report(f'IMG_000{i}.json')['student_match']['method'] for i in (1, 2, 3)}, {'unmatched'})
+        # A student the teacher chose in the meantime stays
+        data = self.report('IMG_0003.json')
+        data['db_student_info'], data['student_match'] = dict(ROSTER[6], is_absent=False), {'method': 'manual', 'candidates': []}
+        (self.reports / 'IMG_0003.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+
+        app.student_manager.students = [dict(s) for s in ROSTER]
+        with patch('AutoGrader.ReviewWindow') as review_window:
+            app.open_review_window()
+        review_window.assert_called_once()
+        results = [(self.report(f'IMG_000{i}.json')['db_student_info']['name'], self.report(f'IMG_000{i}.json')['student_match']['method']) for i in (1, 2, 3)]
+        self.assertEqual(results, [('张三', 'class_name'), ('李四', 'class_name'), ('赵六', 'manual')])
+        self.assertIn('- **学生匹配**: 班级+姓名', (self.reports / 'IMG_0001.md').read_text(encoding='utf-8'))
+        self.assertTrue(any('重新匹配 2 张' in line for line in app.logs), app.logs)
+        self.assertEqual(app.rematch_students(), 0)
+
     def test_summary_names_a_student_found_on_several_sheets(self):
         app = self.grade({"IMG_0001.jpg": sheet('张三', '701'), "IMG_0002.jpg": sheet('张三', '701')})
-        app.log_student_matches()
-        self.assertTrue(any("张三(701) 对应了多张答题卡：IMG_0001.jpg、IMG_0002.jpg" in line for line in app.logs), app.logs)
+        self.assertEqual(app.log_student_matches(), 1)
+        # Each sheet's score and review status, to tell which one to keep
+        self.assertTrue(any("张三(701) 对应了多张答题卡：IMG_0001.jpg（8 分，未复审）、IMG_0002.jpg（8 分，未复审）" in line for line in app.logs), app.logs)
 
     def test_review_choice_is_recorded_and_written_to_the_summary(self):
         app = self.grade({"IMG_0005.jpg": sheet('张五', '701'), "01-05缺.jpg": sheet('孙七', '702'), "IMG_0001.jpg": sheet('张三', '701')})

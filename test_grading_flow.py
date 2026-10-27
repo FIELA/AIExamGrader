@@ -59,6 +59,12 @@ class TestGradingFlow(unittest.TestCase):
                 self.assertIs(threading.current_thread(), threading.main_thread())
                 confirmations.append('layout')
                 callback(layout)
+            def marks_dialog(master, t, template, samples, mode, on_done, **kwargs):
+                self.assertIs(threading.current_thread(), threading.main_thread())
+                self.assertEqual(mode, 'chain')
+                self.assertTrue(samples, 'the scans waiting to be graded are offered as samples')
+                confirmations.append('marks')
+                on_done('skip', template)  # Skipping writes no scores and asks again next time
             original_reset = app.reset_ui_state
             def reset():
                 original_reset()
@@ -66,14 +72,15 @@ class TestGradingFlow(unittest.TestCase):
                 app.after(100, app.quit)
             app.reset_ui_state = reset
             try:
-                with patch('AutoGrader.AIGraderEngine', return_value=engine), patch('standard_answer_dialog.StandardAnswerReviewDialog', side_effect=answer_dialog), patch('AutoGrader.TemplateConfirmDialog', side_effect=layout_dialog), patch('AutoGrader.messagebox.showerror', side_effect=lambda *a: errors.append(str(a))):
+                with patch('AutoGrader.AIGraderEngine', return_value=engine), patch('standard_answer_dialog.StandardAnswerReviewDialog', side_effect=answer_dialog), patch('AutoGrader.TemplateConfirmDialog', side_effect=layout_dialog), patch('AutoGrader.ScoreMarksDialog', side_effect=marks_dialog), patch('AutoGrader.messagebox.showerror', side_effect=lambda *a: errors.append(str(a))):
                     app.after(0, app.start_grading_thread)
                     watchdog = app.after(12000, app.quit)
                     app.mainloop()
                     app.after_cancel(watchdog)
                 self.assertTrue(completed, 'grading never reached reset')
                 self.assertFalse(errors, str(errors))
-                self.assertEqual(confirmations, ['answers', 'layout'])
+                self.assertEqual(confirmations, ['answers', 'layout', 'marks'])
+                self.assertFalse((exam / '阅卷数据' / 'score_marks.json').exists(), 'skipping saves no template')
                 self.assertTrue((exam / '阅卷数据' / 'answer_key.json').is_file())
                 self.assertTrue((exam / '阅卷数据' / 'layout_config.json').is_file())
                 self.assertTrue((exam / '阅卷报告' / '01-01.json').is_file())

@@ -23,6 +23,20 @@ CN_DIGITS = {'零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 
 
 # Matches that a teacher should look at before trusting the student shown
 REVIEW_METHODS = {'class_name_similar', 'ambiguous', 'unmatched'}
+# Set in review when the sheet has no name on it: confirmed without a student, shown as 未署名 in the summary
+UNSIGNED = 'unsigned'
+
+# Header words for each roster field, most specific first; a column is used for one field only
+HEADER_WORDS = (
+    ('id', ('考号', '准考证', '学号', 'id')),
+    ('name', ('姓名', '名字', 'name')),
+    ('class', ('班级', '班别', 'class')),
+    ('room', ('考场', 'room')),
+    ('seat', ('座号', '座位', 'seat')),
+)
+HEADER_SEARCH_ROWS = 15  # Title and note rows may come before the header
+# A class such as 高二1班, 七年级3班 or 701班 in a roster title, sheet name or file name
+CLASS_IN_TITLE = re.compile(r"(?<!\d)(?:[高初][一二三123]|[一二三四五六七八九十]{1,2}年级|\d{1,2}年级)?\s*\d{1,4}\s*班")
 
 def cell_text(value) -> str:
     """Spreadsheet cell as text: empty cells become '' and whole floats such as 6.0 become '6'."""
@@ -95,6 +109,29 @@ def student_key(student: Dict) -> Tuple[str, ...]:
     """Identity of a roster entry."""
     return tuple(str(student.get(k, '')) for k in ('name', 'class', 'id', 'room', 'seat'))
 
+def header_columns(row) -> Dict[str, int]:
+    """Roster field -> column for a header row such as 序号 | 姓  名 | 学号; spacing and full-width forms are ignored."""
+    texts = [re.sub(r"\s+", "", unicodedata.normalize('NFKC', cell_text(v))).lower() for v in row]
+    columns: Dict[str, int] = {}
+    for field, words in HEADER_WORDS:
+        for word in words:
+            # Header cells are short labels; a long title that mentions 名字 is not one
+            i = next((i for i, t in enumerate(texts) if word in t and len(t) <= 12 and i not in columns.values()), None)
+            if i is not None:
+                columns[field] = i
+                break
+    return columns
+
+def find_header(rows) -> Optional[Tuple[int, Dict[str, int]]]:
+    """(row index, columns) of the roster header among the first rows; it must name the student or the exam number."""
+    best = None
+    for r, row in enumerate(rows[:HEADER_SEARCH_ROWS]):
+        columns = header_columns(row)
+        if 'name' in columns or ('id' in columns and len(columns) >= 2):
+            if best is None or len(columns) > len(best[1]):
+                best = (r, columns)
+    return best
+
 class StudentManager:
     def __init__(self):
         self.students: List[Dict[str, str]] = []
@@ -103,50 +140,56 @@ class StudentManager:
     def load_from_file(self, path: str) -> int:
         """
         Load students from an Excel or CSV file.
+        The header may follow title rows, and the roster may be on any sheet (e.g. after a seating chart);
+        sheets with the same columns, such as one sheet per class, are all read. Without a class column,
+        the class is taken from the title above the header (e.g. 高二1班 名单), the sheet name or the file name.
         Returns the number of students loaded.
         """
         self.students = []
         self.student_path = path
-        rows = []
-        
+
         try:
-            if path.endswith('.csv'):
+            if path.lower().endswith('.csv'):
                 with open(path, 'r', encoding='utf-8-sig') as f:
-                    reader = csv.reader(f)
-                    rows = list(reader)
+                    sheets = [('', list(csv.reader(f)))]
             else:
                 if openpyxl is None:
                     raise ImportError("openpyxl is not installed. Please install it to read Excel files.")
                 wb = openpyxl.load_workbook(path, data_only=True)
-                ws = wb.active
-                for row in ws.iter_rows(values_only=True):
-                    rows.append(list(row))
-            
-            if not rows:
-                return 0
+                ordered = [wb.active] + [ws for ws in wb.worksheets if ws is not wb.active]  # Active sheet wins ties
+                sheets = [(ws.title, [list(row) for row in ws.iter_rows(values_only=True)]) for ws in ordered]
 
-            header = [cell_text(h) for h in rows[0]]
-            idx_map = {}
-            for i, col_name in enumerate(header):
-                col_lower = col_name.lower()
-                if "考号" in col_name or "学号" in col_name or "准考证号" in col_name or "id" in col_lower: idx_map['id'] = i
-                elif "姓名" in col_name or "name" in col_lower: idx_map['name'] = i
-                elif "班级" in col_name or "class" in col_lower: idx_map['class'] = i
-                elif "考场" in col_name or "room" in col_lower: idx_map['room'] = i
-                elif "座号" in col_name or "座位" in col_name or "seat" in col_lower: idx_map['seat'] = i
+            found = [(title, rows, find_header(rows)) for title, rows in sheets]
+            found = [(title, rows, header) for title, rows, header in found if header]
+            if not found:
+                raise ValueError("no header row with 姓名 (name) or 考号 (exam number) was found")
+            fields = max((set(header[1]) for _, _, header in found), key=len)
+            # Other sheets, such as a teacher list, only count when laid out like the roster
+            used = [(title, rows, header) for title, rows, header in found if set(header[1]) == fields]
 
-            for row in rows[1:]:
-                values = [cell_text(v) for v in row]
-                if not any(values):
-                    continue  # Blank line
-                s = {'id': '', 'name': '', 'class': '', 'room': '', 'seat': ''}
-                for key, i in idx_map.items():
-                    if i < len(values): s[key] = values[i]
+            for title, rows, (header_row, columns) in used:
+                klass = ''
+                if 'class' not in columns:
+                    sources = [cell_text(v) for row in rows[:header_row] for v in row] + [title]
+                    if len(used) == 1:
+                        sources.append(os.path.basename(path))
+                    match = next((m for m in (CLASS_IN_TITLE.search(s) for s in sources) if m), None)
+                    klass = re.sub(r"\s+", "", match.group()) if match else ''
 
-                if s['room'] and s['room'].isdigit(): s['room'] = s['room'].zfill(2)
-                
-                self.students.append(s)
-                
+                for row in rows[header_row + 1:]:
+                    values = [cell_text(v) for v in row]
+                    s = {'id': '', 'name': '', 'class': klass, 'room': '', 'seat': ''}
+                    for key, i in columns.items():
+                        if i < len(values): s[key] = values[i]
+                    if not (s['name'] or s['id'] or (s['room'] and s['seat'])):
+                        continue  # Blank, note or total row
+                    if header_columns(row) == columns:
+                        continue  # Header repeated on a later page
+
+                    if s['room'] and s['room'].isdigit(): s['room'] = s['room'].zfill(2)
+
+                    self.students.append(s)
+
             return len(self.students)
         except Exception as e:
             raise Exception(f"Failed to parse student file: {str(e)}")

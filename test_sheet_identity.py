@@ -13,6 +13,7 @@ from PIL import Image
 from AutoGrader import App
 from report_files import find_report, unique_report_prefix
 from review_window import ReviewWindow
+from score_marks_service import ScoreMarksService
 from student_manager import StudentManager
 
 ROSTER = [
@@ -35,6 +36,9 @@ class SheetApp:
     regrade_single_file = App.regrade_single_file
     on_review_save = App.on_review_save
     log_student_matches = App.log_student_matches
+    rematch_students = App.rematch_students
+    ensure_jsons_exist = App.ensure_jsons_exist
+    open_review_window = App.open_review_window
     current_lang = "CN"
     layout_description = None
     rubric_path = "rubric.txt"
@@ -46,6 +50,7 @@ class SheetApp:
         self.stop_event = threading.Event()
         self.write_lock = threading.RLock()
         self.rename_lock = threading.Lock()
+        self.score_marks = ScoreMarksService(self)  # As App sets it up: reports are saved through it
         self.completed_count = self.session_completed_count = self.total_files = 0
         self.logs, self.csv_rows = [], []
 
@@ -298,6 +303,46 @@ class TestRosterFile(unittest.TestCase):
             roster_csv.write_text("班级,姓名\n701,张三\n\n701,李四\n", encoding="utf-8")
             self.assertEqual(manager.load_from_file(str(roster_csv)), 2)
             self.assertEqual([s['name'] for s in manager.students], ['张三', '李四'])
+
+    def load(self, sheets, active=0, name="roster.xlsx"):
+        """Load a workbook given as {sheet title: rows}."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            workbook = openpyxl.Workbook()
+            workbook.remove(workbook.active)
+            for title, rows in sheets.items():
+                sheet = workbook.create_sheet(title)
+                for row in rows:
+                    sheet.append(row)
+            workbook.active = active
+            workbook.save(path)
+            manager = StudentManager()
+            manager.load_from_file(str(path))
+            return [(s['class'], s['name'], s['id']) for s in manager.students]
+
+    def test_header_below_title_rows_and_class_from_title(self):
+        # Like the rosters exported per class: title, a note, then the header on row 3
+        rows = [["高二1班 名单"], ["请核对学生姓名是否与系统一致", "说明：学号以教务系统导出的为准"],
+                ["序号", "姓  名", "性别", "成绩", "学号", "状态", "系统编号（勿改）"],
+                [1, "张三", "男", None, "2023001", "在班", "x1"], [2, "李四", "女", None, None, "在班", "x2"],
+                ["序号", "姓名", "性别", "成绩", "学号", "状态", "系统编号（勿改）"],  # Repeated on a later page
+                [3, "王五", "男", None, "2023003", "在班", "x3"], ["合计：3人"]]
+        self.assertEqual(self.load({"名单": rows}), [('高二1班', '张三', '2023001'), ('高二1班', '李四', ''), ('高二1班', '王五', '2023003')])
+
+    def test_roster_on_a_later_sheet(self):
+        seating = [["讲台"], ["张三", "李四", None, "王五"], ["赵六", None, "钱七", "孙八"]]
+        roster = [["高三1班学生名单（按座位排序）"], [], ["序号", "姓名", "排次", "列组"], [1, "张三", "第1排", "第1组"], [2, "李四", "第1排", "第2组"]]
+        self.assertEqual(self.load({"座次表": seating, "学生名单": roster}), [('高三1班', '张三', ''), ('高三1班', '李四', '')])
+
+    def test_one_sheet_per_class(self):
+        sheets = {"高二1班": [["学号", "姓名"], ["01", "张三"]], "高二2班": [["学号", "姓名"], ["02", "李四"]],
+                  "教师": [["姓名", "科目"], ["周老师", "地理"]]}  # Laid out differently: not students
+        self.assertEqual(self.load(sheets), [('高二1班', '张三', '01'), ('高二2班', '李四', '02')])
+        self.assertEqual(self.load({"Sheet1": [["学号", "姓名"], ["01", "张三"]]}, name="名单-七年级3班.xlsx"), [('七年级3班', '张三', '01')])
+
+    def test_missing_header_is_reported(self):
+        with self.assertRaisesRegex(Exception, "姓名"):
+            self.load({"座次表": [["讲台"], ["张三", "李四"], ["王五", "赵六"]]})
 
 
 if __name__ == "__main__":

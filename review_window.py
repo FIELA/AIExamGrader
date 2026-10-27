@@ -19,7 +19,48 @@ from tkinter import messagebox
 import threading
 from theme import Theme
 from report_files import build_report_index, candidate_prefixes, find_report, record_image_name, unique_report_prefix
-from student_manager import REVIEW_METHODS, student_key
+from score_marks_service import write_json_atomic
+from sheet_naming import original_name, sheet_label, students_on_several_sheets
+from student_manager import REVIEW_METHODS, UNSIGNED, student_key
+
+class NoStudentDialog(ctk.CTkToplevel):
+    """Shown when a sheet is confirmed without a student: Close (the default) to choose one, or mark it unsigned."""
+    def __init__(self, parent, title, message, btn_close_text, btn_unsigned_text):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("420x210")
+        self.resizable(False, False)
+
+        self.unsigned = False
+
+        # Center window
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 210
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 105
+        self.geometry(f"+{x}+{y}")
+
+        ctk.CTkLabel(self, text=message, font=("Arial", 14), wraplength=370, justify="left").pack(pady=(25, 15), padx=20)
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=10)
+
+        self.btn_unsigned = ctk.CTkButton(btn_frame, text=btn_unsigned_text, fg_color="gray", width=120, command=self.on_unsigned)
+        self.btn_unsigned.pack(side="left", padx=10)
+        self.btn_close = ctk.CTkButton(btn_frame, text=btn_close_text, fg_color="#106A38", width=120, command=self.destroy)
+        self.btn_close.pack(side="left", padx=10)
+
+        # Close is the default: Return, Escape and the window's own close button choose it
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        self.transient(parent)
+        self.grab_set()
+        self.focus_set()
+        self.wait_window()
+
+    def on_unsigned(self):
+        self.unsigned = True
+        self.destroy()
 
 class ResumeDialog(ctk.CTkToplevel):
     def __init__(self, parent, title, message, btn_continue_text, btn_restart_text):
@@ -58,6 +99,8 @@ class ResumeDialog(ctk.CTkToplevel):
         self.destroy()
 
 class ReviewWindow(ctk.CTkToplevel):
+    ADVANCE_DELAY = 5  # Seconds a sheet's confirmed score stays on screen after its first review
+
     def __init__(self, parent, exam_folder, student_manager, on_save_callback, lang="CN", translations=None):
         super().__init__(parent)
         
@@ -78,6 +121,9 @@ class ReviewWindow(ctk.CTkToplevel):
         self.current_index = 0
         self.current_data = None
         self.current_json_path = None  # Report the current sheet was loaded from
+        self.opened_unreviewed = False  # The current sheet had not been reviewed when it was opened
+        self.lbl_other_sheets = None  # Warning that the current sheet's student is on other sheets too
+        self.btn_remove_sheet = None  # Takes the current sheet out of the grades when it is one of those
         self.current_image = None
         self.photo_image = None
         
@@ -97,6 +143,7 @@ class ReviewWindow(ctk.CTkToplevel):
         self.sub_entries = {}
         
         self.last_confirm_time = 0 # For debounce
+        self.advance_job = None  # Pending move to the next sheet after a first review
         self.chk_absence_var = ctk.BooleanVar() # Variable for absence checkbox
         self.log_window = None # Singleton reference for log window
         
@@ -150,6 +197,40 @@ class ReviewWindow(ctk.CTkToplevel):
             self.destroy()
             return
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Typing while a confirmed sheet counts down means the teacher is still editing it
+        self.bind("<KeyPress>", lambda e: self.cancel_advance(restore=True), add="+")
+        # The scores written on a sheet's image appear once drawn (score_marks_service)
+        service = getattr(self.parent_app, 'score_marks', None)
+        if service:
+            service.add_listener(self.on_marks_published)
+
+    def destroy(self):
+        service = getattr(self.parent_app, 'score_marks', None)
+        if service:
+            service.remove_listener(self.on_marks_published)
+        super().destroy()
+
+    @staticmethod
+    def read_image(path):
+        """The image in memory, with its file closed again (the scores may be redrawn onto it meanwhile)."""
+        with Image.open(path) as im:
+            im.load()
+            return im.copy()
+
+    def on_marks_published(self, json_path):
+        """Show the sheet's newly drawn scores if it is still the one on screen, keeping the zoom and scrolling."""
+        if not self.winfo_exists() or self.view_mode != 'image' or not self.current_json_path or not self.image_files:
+            return
+        if os.path.abspath(self.current_json_path) != os.path.abspath(json_path):
+            return
+        try:
+            self.current_image = self.read_image(self.image_files[self.current_index])
+        except Exception:
+            return
+        x, y = self.canvas.xview()[0], self.canvas.yview()[0]
+        self.redraw_image()
+        self.canvas.xview_moveto(x)
+        self.canvas.yview_moveto(y)
 
     def t(self, key, **kwargs):
         """Translate helper"""
@@ -167,7 +248,10 @@ class ReviewWindow(ctk.CTkToplevel):
     @staticmethod
     def student_display(s):
         """Dropdown text for a roster entry. Format: Name | Class | ID | Room-Seat"""
-        return f"{s['name']} | {s.get('class','')}班 | {s['id']} | {s.get('room','')}-{s.get('seat','')}"
+        klass = str(s.get('class', ''))
+        if klass and not klass.endswith('班'):
+            klass += '班'  # 701 -> 701班; 高二1班 stays as it is
+        return f"{s.get('name', '')} | {klass} | {s.get('id', '')} | {s.get('room', '')}-{s.get('seat', '')}"
 
     def bind_selected_student(self, selected_str):
         """Bind the student chosen in the dropdown; free text only updates the name and ID."""
@@ -190,6 +274,30 @@ class ReviewWindow(ctk.CTkToplevel):
                 self.current_data['student_match'] = {'method': 'manual', 'candidates': []}
         except: pass
 
+    def student_selected(self):
+        """
+        Bind the student shown in the dropdown and tell whether the sheet may be confirmed. Without a student (and with
+        a roster to choose from), ask: Close, the default, shows the dropdown to choose one; Unsigned lets the sheet be
+        confirmed without a student, marked 未署名 in its report and the summary.
+        """
+        if self.combo_student.winfo_exists():
+            self.bind_selected_student(self.combo_student.get())
+        match = self.current_data.get('student_match') or {}
+        name = (self.current_data.get('db_student_info') or {}).get('name')
+        # Choosing a student later replaces the unsigned mark (bind_selected_student records it as chosen)
+        if name not in (None, '', '未知') or match.get('method') == UNSIGNED or not self.student_manager.students:
+            return True
+        dialog = NoStudentDialog(self, self.t("title_select_student"), self.t("msg_select_student_first"),
+                                 self.t("btn_close"), self.t("btn_unsigned"))
+        if dialog.unsigned:
+            self.current_data['student_match'] = {'method': UNSIGNED, 'candidates': match.get('candidates', [])}
+            return True
+        if self.view_mode == 'image' and self.current_step_index != 0:
+            self.current_step_index = 0  # The dropdown is on the first step
+            self.load_step_ui()
+        self.combo_student.focus_set()
+        return False
+
     def report_student(self, image_file):
         """Student bound to this image's report, else the one its file name points to."""
         json_path = self.find_report_json(image_file)
@@ -202,6 +310,45 @@ class ReviewWindow(ctk.CTkToplevel):
             except (OSError, ValueError):
                 pass
         return self.student_manager.get_student_by_filename(os.path.basename(image_file))[0]
+
+    def other_sheets_of_student(self):
+        """The other graded sheets bound to the current sheet's student, each with its score and review status."""
+        key = student_key((self.current_data or {}).get('db_student_info') or {})
+        current = os.path.abspath(self.current_json_path) if self.current_json_path else None
+        return [sheet_label(data, record_image_name(data) or os.path.basename(path), self.t)
+                for path, data in students_on_several_sheets(self.reports_dir).get(key, []) if os.path.abspath(path) != current]
+
+    def remove_current_sheet(self):
+        """
+        Take the current sheet, one of several for its student (e.g. scanned twice), out of the grades after asking:
+        its image and report move to the removed folder (see App.remove_sheet), and the review goes on at the sheet
+        that takes its place.
+        """
+        app = self.parent_app
+        if app.processing:
+            messagebox.showinfo(self.t("title_remove_sheet"), self.t("msg_remove_busy"), parent=self)
+            return
+        if not self.current_json_path:
+            return
+        image = self.image_files[self.current_index]
+        folder = os.path.basename(app.get_folder_path('removed'))
+        sheet = sheet_label(self.current_data, os.path.basename(image), self.t)
+        message = self.t("msg_remove_sheet_confirm", sheet=sheet, folder=folder, backup=os.path.basename(app.get_folder_path('original_files')))
+        if not messagebox.askyesno(self.t("title_remove_sheet"), message, parent=self):
+            return
+        self.cancel_advance()
+        try:
+            app.remove_sheet(image, self.current_json_path)
+        except Exception as e:
+            messagebox.showerror(self.t("title_error"), self.t("msg_error", error=e), parent=self)
+            return
+        index = self.current_index
+        self.load_file_list()
+        if not self.image_files:
+            self.destroy()
+            return
+        self.current_index = min(index, len(self.image_files) - 1)
+        self.load_current_student()
 
     def load_file_list(self):
         valid_extensions = ('.png', '.jpg', '.jpeg')
@@ -220,14 +367,22 @@ class ReviewWindow(ctk.CTkToplevel):
 
             self.image_files = []
             self.report_index = build_report_index(self.reports_dir)
+            scanned_as = {}
 
             # Filter: Only include files with generated reports (JSON)
             for f in all_files:
                 try:
-                    if self.find_report_json(f):
+                    json_path = self.find_report_json(f)
+                    if json_path:
                         self.image_files.append(f)
+                        with open(json_path, 'r', encoding='utf-8') as jf:
+                            scanned_as[f] = original_name(json.load(jf), f)
                 except Exception as e:
                     pass
+
+            # In the order the sheets were scanned, as the paper pile is: a sheet renamed after its exam number
+            # (e.g. 114514.jpg) or its student stays where it was scanned instead of moving to the front
+            self.image_files.sort(key=lambda f: (scanned_as.get(f) or os.path.basename(f), f))
 
     def setup_ui(self):
         # Clear existing widgets
@@ -268,9 +423,6 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), image=self.parent_app.icons.get("document"), width=60, command=self.show_review_logs, fg_color=Theme.TEXT_MUTED_DARK)
         self.btn_logs.pack(side="left", padx=5)
 
-        self.btn_export = ctk.CTkButton(self.action_frame, text=self.t("btn_export"), image=self.parent_app.icons.get("folder"), width=60, command=self.open_export, fg_color="#0F766E", hover_color="#115E59")
-        self.btn_export.pack(side="left", padx=5)
-        
         # --- Right Group (Packed from Right to Left) ---
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color=Theme.SECONDARY, hover_color=Theme.SECONDARY_HOVER)
         self.btn_confirm_all.pack(side="right", padx=10, pady=10)
@@ -394,9 +546,6 @@ class ReviewWindow(ctk.CTkToplevel):
         self.btn_logs = ctk.CTkButton(self.action_frame, text=self.t("btn_logs"), width=60, command=self.show_review_logs, fg_color="#4B5563")
         self.btn_logs.pack(side="left", padx=5)
 
-        self.btn_export = ctk.CTkButton(self.action_frame, text=self.t("btn_export"), width=60, command=self.open_export, fg_color="#0F766E", hover_color="#115E59")
-        self.btn_export.pack(side="left", padx=5)
-        
         # --- Right Group (Packed from Right to Left) ---
         self.btn_confirm_all = ctk.CTkButton(self.action_frame, text=self.t("btn_confirm_next"), width=140, command=self.confirm_all_and_next, fg_color="#106A38")
         self.btn_confirm_all.pack(side="right", padx=10, pady=10)
@@ -480,20 +629,76 @@ class ReviewWindow(ctk.CTkToplevel):
 
     # --- Navigation Methods ---
     def next_student(self):
-        if self.current_index < len(self.image_files) - 1:
+        """
+        On from a confirmed sheet. After a sheet's first review this is the next sheet still to review, so sheets
+        already reviewed are not shown again; after another review it is the next sheet. Past the last one, see finish_review.
+        """
+        if self.opened_unreviewed:
+            later = [i for i in self.unreviewed_indexes() if i > self.current_index]
+            if later:
+                self.current_index = later[0]
+                self.load_current_student()
+                return
+        elif self.current_index < len(self.image_files) - 1:
             self.current_index += 1
             self.load_current_student()
-        else:
-            # Review is done: offer to export the sheets under their students' names
-            export = messagebox.askyesno(self.t("title_success"), self.t("msg_all_reviewed_export"), parent=self)
-            self.destroy()
-            if export:
-                self.parent_app.open_export_dialog()
+            return
+        self.finish_review()
 
-    def open_export(self):
-        """Export the sheets named after their students, using the reports saved so far."""
-        self.parent_app.open_export_dialog(self)
-            
+    def unreviewed_indexes(self):
+        """Positions of the sheets whose report has not been reviewed yet, in list order."""
+        pending = []
+        for i, image in enumerate(self.image_files):
+            try:
+                with open(self.find_report_json(image), 'r', encoding='utf-8') as f:
+                    if json.load(f).get('review_count', 0) == 0:
+                        pending.append(i)
+            except (OSError, TypeError, ValueError, AttributeError):
+                pass  # No readable report: nothing to review here
+        return pending
+
+    def finish_review(self):
+        """
+        Past the last sheet. While sheets are still to review (skipped, or before where the review was picked up),
+        the first of them is opened instead and the teacher told how many are left. Once every sheet is reviewed:
+        close, then rename the sheets after their students (Class-Name).
+        """
+        pending = self.unreviewed_indexes()
+        if pending:
+            self.current_index = pending[0]
+            self.load_current_student()
+            numbers = "、".join(str(i + 1) for i in pending[:10]) + ("…" if len(pending) > 10 else "")
+            messagebox.showinfo(self.t("title_review_incomplete"),
+                                self.t("msg_review_incomplete", count=len(pending), numbers=numbers), parent=self)
+            return
+        self.current_index = 0
+        self.save_progress_to_file()  # Done: a later review starts from the first sheet
+        self.destroy()
+        app = self.parent_app
+        if app.processing:
+            # Sheets still being graded will be reviewed too; finishing that review renames them all
+            message = self.t("msg_all_reviewed_rename_later")
+        else:
+            try:
+                renamed, kept = app.rename_reviewed_sheets()
+            except Exception as e:
+                app.log(self.t("msg_error", error=e))
+                messagebox.showerror(self.t("title_error"), self.t("msg_error", error=e), parent=app)
+                return
+            message = self.t("msg_all_reviewed_renamed", renamed=renamed, backup=os.path.basename(app.get_folder_path('original_files')))
+            if kept:
+                message += "\n" + self.t("msg_rename_kept", kept=kept)
+        # A sheet scanned twice gives its student two scores in the summary
+        for key, sheets in students_on_several_sheets(self.reports_dir).items():
+            files = "、".join(sheet_label(data, record_image_name(data) or os.path.basename(path), self.t) for path, data in sheets)
+            message += "\n\n" + self.t("msg_student_several_sheets", student=f"{key[0]}({key[1]})", count=len(sheets), files=files)
+        # The scores on the images: caught up now that the sheets have their final names, or how to start them
+        if hasattr(app, 'score_marks_after_review'):
+            hint = app.score_marks_after_review()
+            if hint:
+                message += "\n\n" + hint
+        messagebox.showinfo(self.t("title_success"), message, parent=app)
+
     def prev_student(self):
         if self.current_index > 0:
             self.current_index -= 1
@@ -507,8 +712,7 @@ class ReviewWindow(ctk.CTkToplevel):
             self.current_index += 1
             self.load_current_student()
         else:
-            messagebox.showinfo("Done", self.t("msg_all_reviewed"))
-            self.destroy()
+            self.finish_review()
 
     def search_student(self):
         query = self.entry_search.get().strip().lower()
@@ -679,7 +883,8 @@ class ReviewWindow(ctk.CTkToplevel):
 
     def load_current_student(self):
         if not self.image_files: return
-        
+        self.cancel_advance()  # Moving to any sheet ends a pending countdown
+
         filename = self.image_files[self.current_index]
         # Update Counter
         self.lbl_counter.configure(text=self.t("lbl_student_counter", index=self.current_index + 1, total=len(self.image_files)))
@@ -698,7 +903,7 @@ class ReviewWindow(ctk.CTkToplevel):
             
             if os.path.exists(img_path):
                 try:
-                    self.current_image = Image.open(img_path)
+                    self.current_image = self.read_image(img_path)
                     
                     # Force canvas to update its layout
                     self.canvas.update_idletasks()
@@ -779,7 +984,8 @@ class ReviewWindow(ctk.CTkToplevel):
             
         if 'original_filename' not in self.current_data or not self.current_data['original_filename']:
             self.current_data['original_filename'] = filename
-            
+        self.opened_unreviewed = self.current_data.get('review_count', 0) == 0
+
         # Backup for Diff (Review Logs)
         self.original_data = copy.deepcopy(self.current_data)
             
@@ -831,20 +1037,8 @@ class ReviewWindow(ctk.CTkToplevel):
             self.report_textbox.insert("1.0", f"No Report Generated\nPath: {md_path}")
 
         # Update Status Label (Now that current_data is loaded)
-        review_count = self.current_data.get("review_count", 0)
-        status_text = self.t("status_unreviewed")
-        status_color = "red"
-        
-        if review_count == 1:
-            status_text = self.t("status_reviewed")
-            status_color = "green"
-        elif review_count >= 2:
-            status_text = self.t("status_second_review")
-            status_color = "blue"
-            
-        if hasattr(self, 'lbl_status'):
-            self.lbl_status.configure(text=self.t("lbl_status", status=status_text), text_color=status_color)
-            
+        self.update_status_label()
+
         self.update_score_display()
             
 
@@ -862,6 +1056,59 @@ class ReviewWindow(ctk.CTkToplevel):
         else:
             self.load_no_image_ui()
         
+    def update_status_label(self):
+        review_count = self.current_data.get("review_count", 0)
+        status_text = self.t("status_unreviewed")
+        status_color = "red"
+
+        if review_count == 1:
+            status_text = self.t("status_reviewed")
+            status_color = "green"
+        elif review_count >= 2:
+            status_text = self.t("status_second_review")
+            status_color = "blue"
+
+        if hasattr(self, 'lbl_status'):
+            self.lbl_status.configure(text=self.t("lbl_status", status=status_text), text_color=status_color)
+
+    def show_confirmed_result(self):
+        """Show the saved status, total and report of the sheet just confirmed."""
+        self.update_status_label()
+        self.update_score_display()
+        md_path = os.path.splitext(self.current_json_path)[0] + ".md" if self.current_json_path else ""
+        if md_path and os.path.exists(md_path) and hasattr(self, 'report_textbox'):
+            with open(md_path, "r", encoding="utf-8") as f:
+                md_content = f.read()
+            self.report_textbox.delete("1.0", "end")
+            self.report_textbox.insert("1.0", md_content)
+
+    def count_down_to_next(self, seconds):
+        """After a first review, keep the confirmed sheet on screen for a few seconds, then open the next one."""
+        if not self.winfo_exists():
+            return
+        if seconds <= 0:
+            self.advance_now()
+            return
+        if hasattr(self, 'btn_confirm_all'):
+            self.btn_confirm_all.configure(text=self.t("btn_next_in", seconds=seconds), state="normal")
+        self.advance_job = self.after(1000, lambda: self.count_down_to_next(seconds - 1))
+
+    def advance_now(self):
+        self.cancel_advance()
+        self.next_student()
+
+    def cancel_advance(self, restore=False):
+        """Stop a pending move to the next sheet; with restore, the confirm button reads as before."""
+        if not self.advance_job:
+            return
+        try:
+            self.after_cancel(self.advance_job)
+        except Exception:
+            pass
+        self.advance_job = None
+        if restore:
+            self.update_confirm_button_state()
+
     def start_confirm_timer(self):
         """Disable confirm button for 3 seconds to prevent accidental clicks"""
         if not hasattr(self, 'btn_confirm_all'): return
@@ -1104,6 +1351,17 @@ class ReviewWindow(ctk.CTkToplevel):
             color = Theme.WARNING if student_match['method'] in REVIEW_METHODS else None
             ctk.CTkLabel(parent, text=text, text_color=color, wraplength=400, justify="left").pack(anchor="w", pady=(0, 5))
 
+        # --- The same student on other sheets (e.g. a sheet scanned twice) ---
+        self.lbl_other_sheets = self.btn_remove_sheet = None
+        others = self.other_sheets_of_student()
+        if others:
+            self.lbl_other_sheets = ctk.CTkLabel(parent, text=self.t("lbl_other_sheets", files="、".join(others)),
+                                                 text_color=Theme.WARNING, wraplength=400, justify="left")
+            self.lbl_other_sheets.pack(anchor="w", pady=(0, 5))
+            self.btn_remove_sheet = ctk.CTkButton(parent, text=self.t("btn_remove_sheet"), width=140, command=self.remove_current_sheet,
+                                                  fg_color=Theme.DANGER, hover_color=Theme.DANGER_HOVER)
+            self.btn_remove_sheet.pack(anchor="w", pady=(0, 5))
+
         # --- Search Filter ---
         ctk.CTkLabel(parent, text=self.t("lbl_filter")).pack(anchor="w")
         self.entry_filter = ctk.CTkEntry(parent, placeholder_text=self.t("lbl_filter"))
@@ -1120,7 +1378,7 @@ class ReviewWindow(ctk.CTkToplevel):
         suggested = [s for s in dict.fromkeys(suggested) if s in self.full_student_list]
         self.full_student_list = suggested + [s for s in self.full_student_list if s not in suggested]
 
-        current_val = f"{db_info.get('name', '')} | {db_info.get('class','')}班 | {db_info.get('id', '')} | {db_info.get('room','')}-{db_info.get('seat','')}"
+        current_val = self.student_display(db_info)
         
         self.combo_student = ctk.CTkComboBox(parent, values=self.full_student_list, width=400)
         
@@ -1258,7 +1516,19 @@ class ReviewWindow(ctk.CTkToplevel):
             if self.view_mode == 'image':
                 self.load_step_ui()
             else:
-                self.load_no_image_ui()
+                self.redraw_text_mode()
+
+    def redraw_text_mode(self):
+        """Rebuild the text-mode panels, keeping the student and scores chosen but not yet confirmed."""
+        student = self.combo_student.get() if self.combo_student.winfo_exists() else None
+        typed = {q: entry.get() for q, (entry, _) in self.sub_entries.items() if entry.winfo_exists()}
+        self.load_no_image_ui()
+        if student is not None:
+            self.combo_student.set(student)
+        for q, (entry, _) in self.sub_entries.items():
+            if q in typed:
+                entry.delete(0, "end")
+                entry.insert(0, typed[q])
 
     def recalculate_totals(self):
         details = self.current_data.get('details', [])
@@ -1294,7 +1564,6 @@ class ReviewWindow(ctk.CTkToplevel):
         btn_frame.pack(fill="x", pady=20)
         
         ctk.CTkButton(btn_frame, text=self.t("btn_correct"), fg_color="#106A38", width=120, command=self.next_step).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text=self.t("btn_confirm_edit"), fg_color="#D97706", width=120, command=self.next_step).pack(side="left", padx=10)
 
     def confirm_all_and_next(self):
         # Debounce check (3 seconds)
@@ -1302,9 +1571,15 @@ class ReviewWindow(ctk.CTkToplevel):
         now = time.time()
         if now - self.last_confirm_time < 3.0:
             return
+        if self.advance_job:
+            # Already confirmed and counting down: open the next sheet now
+            self.advance_now()
+            return
+        # 1. Student: in image mode the dropdown is gone by the last step, where leaving the first step bound it.
+        # Without a student, ask: Close stays to choose one (the next click needs no 3-second wait), Unsigned goes on
+        if not self.student_selected():
+            return
         self.last_confirm_time = now
-
-        self.bind_selected_student(self.combo_student.get())
 
         # 2. Save Obj
         try:
@@ -1396,9 +1671,16 @@ class ReviewWindow(ctk.CTkToplevel):
                          self.current_data['total_score'] = sub_sum + legacy_obj
             
             self.current_data['absence_confirmed'] = False
-        
-        self.save_to_disk()
-        self.next_student()
+
+        first_review = self.current_data.get('review_count', 0) == 0
+        if not self.save_to_disk():
+            return  # Not saved: stay on this sheet
+        if first_review:
+            # Leave the confirmed score on screen for a moment before moving on
+            self.show_confirmed_result()
+            self.count_down_to_next(self.ADVANCE_DELAY)
+        else:
+            self.next_student()
 
 
     def save_current_step(self):
@@ -1461,11 +1743,12 @@ class ReviewWindow(ctk.CTkToplevel):
                      self.current_data['total_score'] = sub_sum
                  else:
                      self.current_data['total_score'] = sub_sum + legacy_obj
-        
-        self.save_to_disk()
-        return True
+
+        return self.save_to_disk()  # Not saved: the step stays open
 
     def next_step(self):
+        if self.steps[self.current_step_index]['type'] == 'info' and not self.student_selected():
+            return  # The sheet's student comes first
         if not self.save_current_step(): return
         if self.current_step_index < len(self.steps) - 1:
             self.current_step_index += 1
@@ -1474,6 +1757,7 @@ class ReviewWindow(ctk.CTkToplevel):
             self.next_student()
 
     def prev_step(self):
+        self.cancel_advance()  # Going back means staying on this sheet
         if self.current_step_index > 0:
             self.current_step_index -= 1
             self.load_step_ui()
@@ -1556,12 +1840,13 @@ class ReviewWindow(ctk.CTkToplevel):
             # Ideally we should disable the button
             
             def run_regrade():
+                # A worker must not call Tk itself: results go through the app's main-thread queue
                 success, msg = self.parent_app.regrade_single_file(img_path)
                 if success:
-                    self.after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_regrade_success")))
-                    self.after(0, self.load_current_student)
+                    self.parent_app.ui_after(0, lambda: messagebox.showinfo(self.t("title_success"), self.t("msg_regrade_success")))
+                    self.parent_app.ui_after(0, self.load_current_student)
                 else:
-                    self.after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_regrade_failed", error=msg)))
+                    self.parent_app.ui_after(0, lambda: messagebox.showerror(self.t("title_error"), self.t("msg_regrade_failed", error=msg)))
             
             threading.Thread(target=run_regrade, daemon=True).start()
         else:
@@ -1593,10 +1878,14 @@ class ReviewWindow(ctk.CTkToplevel):
         except: pass
 
     def save_to_disk(self):
-        if not self.current_data: return
-        
+        """
+        Save the current sheet's report (the scores on its graded image follow it), then its Markdown and summary row.
+        Returns False, keeping the review count and log as they were, when the report could not be saved.
+        """
+        if not self.current_data: return False
+
         self.update_score_display()
-        
+
         # 1. Save to JSON & MD
         # Write back to the report this sheet was loaded from: binding another student must neither
         # leave this report behind nor overwrite the report of that student's own sheet
@@ -1624,6 +1913,12 @@ class ReviewWindow(ctk.CTkToplevel):
                 self.report_index[image_name] = json_path
         md_path = os.path.splitext(json_path)[0] + ".md"
         
+        # What to go back to if the report cannot be written. Restored in place: the steps hold the report's items,
+        # and the scores typed stay on screen
+        saved_fields = ('review_count', 'confirm_absence', 'review_logs')
+        unsaved = ({k: copy.deepcopy(self.current_data[k]) for k in saved_fields if k in self.current_data},
+                   copy.deepcopy(getattr(self, 'original_data', None) or self.current_data))
+
         # Increment Review Count
         current_count = self.current_data.get('review_count', 0)
         self.current_data['review_count'] = current_count + 1
@@ -1685,16 +1980,27 @@ class ReviewWindow(ctk.CTkToplevel):
         # ------------------------------------
         
         try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(self.current_data, f, ensure_ascii=False, indent=2)
+            service = getattr(self.parent_app, 'score_marks', None)
+            if service:
+                service.commit_report(json_path, self.current_data)
+            else:
+                write_json_atomic(json_path, self.current_data)
         except Exception as e:
-            print(f"Error saving JSON: {e}")
-        
+            fields, self.original_data = unsaved
+            for key in saved_fields:
+                if key in fields:
+                    self.current_data[key] = fields[key]
+                else:
+                    self.current_data.pop(key, None)
+            messagebox.showerror(self.t("title_error"), self.t("msg_review_save_failed", error=e), parent=self)
+            return False
+
         # 2. Regenerate Markdown file
         self.update_markdown_file(md_path)
-        
+
         # 3. Update CSV row directly
         self.update_csv_row()
+        return True
             
     def update_markdown_file(self, md_path):
         """Regenerate markdown file from current data"""
@@ -2119,6 +2425,11 @@ class ReviewWindow(ctk.CTkToplevel):
         return False
 
     def on_close(self):
+        confirmed = self.advance_job is not None
+        self.cancel_advance()
+        if confirmed and not self.unreviewed_indexes():
+            self.finish_review()  # Closed while the last sheet to review was shown confirmed: the review is done
+            return
         # Auto-save on close
         self.save_progress_to_file()
         self.destroy()

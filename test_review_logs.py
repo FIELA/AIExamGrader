@@ -4,111 +4,87 @@
 # Public forks allowed solely for PRs (delete within 14 days after PR merged, rejected, or closed).
 # Commercial licensing inquiries: nicofiela@outlook.com. See LICENSE file for full terms.
 
-import unittest
-import json
-import os
+"""Each review save logs what changed, through the review window's real save, without opening a window."""
 import copy
-from datetime import datetime
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
 from review_window import ReviewWindow
-import customtkinter as ctk
 
-# Mock ReviewWindow to test logic without GUI
-class MockReviewWindow:
-    def __init__(self):
-        self.current_data = {
-            "total_score": 70,
-            "confirm_absence": "",
-            "details": [
-                {"question_id": "1", "score": 3},
-                {"question_id": "2", "score": 0}
-            ],
-            "db_student_info": {"room": "01", "seat": "01"}
-        }
-        self.original_data = copy.deepcopy(self.current_data)
-        self.chk_absence_var = ctk.BooleanVar(value=False)
-        self.reports_dir = "."
-        self.on_save_callback = None
+
+class Var:
+    """Stands in for the absence checkbox's Tk variable, which needs a window to exist."""
+    def __init__(self, value=False):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
+class LogStub:
+    """Runs ReviewWindow.save_to_disk on a report in a temporary folder."""
+    save_to_disk = ReviewWindow.save_to_disk
+
+    def __init__(self, json_path, data):
         self.parent_app = None
+        self.current_json_path = str(json_path)
+        self.reports_dir = str(json_path.parent)
+        self.current_data = data
+        self.original_data = copy.deepcopy(data)
+        self.chk_absence_var = Var(False)
+        self.image_files, self.current_index, self.report_index = [], 0, {}
 
-    # Copy the logic from save_to_disk (only the diff part)
-    def calculate_diff(self):
-        # Simulate update from UI
-        is_confirmed = self.chk_absence_var.get()
-        self.current_data['confirm_absence'] = '是' if is_confirmed else ''
-        
-        if not hasattr(self, 'original_data'):
-             self.original_data = copy.deepcopy(self.current_data)
-             
-        changes = []
-        
-        # Check Total Score
-        old_score = self.original_data.get('total_score', 0)
-        new_score = self.current_data.get('total_score', 0)
-        if old_score != new_score:
-            changes.append(f"Total Score: {old_score} -> {new_score}")
-            
-        # Check Confirm Absence
-        old_abs = self.original_data.get('confirm_absence', '')
-        new_abs = self.current_data.get('confirm_absence', '')
-        if old_abs != new_abs:
-            changes.append(f"Confirm Absence: '{old_abs}' -> '{new_abs}'")
-            
-        # Check Question Details
-        old_details = {item['question_id']: item for item in self.original_data.get('details', [])}
-        new_details = {item['question_id']: item for item in self.current_data.get('details', [])}
-        
-        for q_id, new_item in new_details.items():
-            old_item = old_details.get(q_id)
-            if old_item:
-                if old_item.get('score') != new_item.get('score'):
-                    changes.append(f"Q{q_id} Score: {old_item.get('score')} -> {new_item.get('score')}")
-            else:
-                changes.append(f"Q{q_id} Added")
-                
-        if changes:
-            log_entry = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "changes": changes,
-                "user": "Reviewer"
-            }
-            if 'review_logs' not in self.current_data:
-                self.current_data['review_logs'] = []
-            self.current_data['review_logs'].append(log_entry)
-            
-            # Update original_data for next save
-            self.original_data = copy.deepcopy(self.current_data)
-            return True
-        return False
+    def update_score_display(self): pass
+    def update_markdown_file(self, md_path): pass
+    def update_csv_row(self): pass
+
 
 class TestReviewLogs(unittest.TestCase):
     def test_log_creation(self):
-        window = MockReviewWindow()
-        
-        # 1. Modify Score
-        window.current_data['total_score'] = 75
-        window.current_data['details'][0]['score'] = 5 # Hack: max score ignored for test
-        
-        has_changes = window.calculate_diff()
-        self.assertTrue(has_changes)
-        
-        logs = window.current_data.get('review_logs', [])
-        self.assertEqual(len(logs), 1)
-        self.assertIn("Total Score: 70 -> 75", logs[0]['changes'])
-        self.assertIn("Q1 Score: 3 -> 5", logs[0]['changes'])
-        
-        # 2. Modify Absence
-        window.chk_absence_var.set(True)
-        has_changes = window.calculate_diff()
-        self.assertTrue(has_changes)
-        
-        logs = window.current_data.get('review_logs', [])
-        self.assertEqual(len(logs), 2)
-        self.assertIn("Confirm Absence: '' -> '是'", logs[1]['changes'])
-        
-        # 3. No Change
-        has_changes = window.calculate_diff()
-        self.assertFalse(has_changes)
-        self.assertEqual(len(logs), 2)
+        with tempfile.TemporaryDirectory() as folder:
+            json_path = Path(folder) / "01-01.json"
+            data = {
+                "total_score": 70,
+                "confirm_absence": "",
+                "details": [{"question_id": "1", "score": 3}, {"question_id": "2", "score": 0}],
+                "db_student_info": {"room": "01", "seat": "01"},
+            }
+            json_path.write_text(json.dumps(data), encoding='utf-8')
+            window = LogStub(json_path, data)
+
+            def saved():
+                return json.loads(json_path.read_text(encoding='utf-8'))
+
+            # 1. Modify Score
+            window.current_data['total_score'] = 75
+            window.current_data['details'][0]['score'] = 5  # Hack: max score ignored for test
+            self.assertTrue(window.save_to_disk())
+            logs = saved()['review_logs']
+            self.assertEqual(len(logs), 1)
+            self.assertIn("Total Score: 70 -> 75", logs[0]['changes'])
+            self.assertIn("Q1 Score: 3 -> 5", logs[0]['changes'])
+            self.assertEqual(saved()['review_count'], 1)
+
+            # 2. Modify Absence (stored in English for data consistency)
+            window.chk_absence_var.set(True)
+            self.assertTrue(window.save_to_disk())
+            logs = saved()['review_logs']
+            self.assertEqual(len(logs), 2)
+            self.assertIn("Confirm Absence: '' -> 'Yes'", logs[1]['changes'])
+            self.assertEqual(saved()['confirm_absence'], 'Yes')
+
+            # 3. No Change: the confirmation itself is logged
+            self.assertTrue(window.save_to_disk())
+            logs = saved()['review_logs']
+            self.assertEqual(len(logs), 3)
+            self.assertEqual(logs[2]['changes'], ["Review Confirmed"])
+            self.assertEqual(saved()['review_count'], 3)
+
 
 if __name__ == '__main__':
     unittest.main()

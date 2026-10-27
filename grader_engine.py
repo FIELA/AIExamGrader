@@ -11,7 +11,7 @@ import json
 import re
 import time
 from typing import List, Dict, Any, Optional
-from PIL import Image
+from PIL import Image, ImageOps
 import google.generativeai as genai
 from openai import OpenAI
 from utils import clean_json_string
@@ -292,6 +292,47 @@ class AIGraderEngine:
                 return response.text
         except Exception as e:
             raise RuntimeError(f"Detection failed: {e}") from e
+
+    def locate_marks(self, image_path, subjective_ids, has_objective, timeout=120):
+        """
+        Where a teacher would write the scores on this sheet: the title, the multiple-choice answers and each
+        sub-question's number, as box_2d [ymin, xmin, ymax, xmax] scaled to 0-1000 (the format Gemini is trained on).
+        Only suggestions for the score-position dialog; anything not found is left out. Grading is not involved.
+        """
+        ids = '、'.join(subjective_ids) or '（无）'
+        objective = '- "objective"：学生书写或填涂选择题答案的区域。\n' if has_objective else ''
+        example = '"objective": [ymin, xmin, ymax, xmax], ' if has_objective else ''
+        prompt = (
+            "你会看到一张已扫描的答题卡。请找出下列位置，每个位置用 box_2d 表示：[ymin, xmin, ymax, xmax]，"
+            "按图片尺寸归一化到 0–1000。\n"
+            "- \"title\"：答题卡顶部的考试标题文字（如“××学校××考试 高三地理”）。\n"
+            f"{objective}"
+            "- \"questions\"：下列每个小问的题号标记（例如第 17 题作答区域里印刷的“(1)”）；"
+            f"没有印刷题号时，给出该小问作答内容的起始处：{ids}\n"
+            "只输出 JSON，不要 Markdown："
+            f"{{\"title\": [ymin, xmin, ymax, xmax], {example}\"questions\": {{\"17(1)\": [ymin, xmin, ymax, xmax]}}}}\n"
+            "找不到的项不要输出，不要猜测。"
+        )
+        with Image.open(image_path) as im:
+            image = ImageOps.exif_transpose(im).convert('RGB')  # The coordinates must match the image as shown
+        if self.provider == "OpenAI":
+            buffer = BytesIO()
+            image.save(buffer, 'JPEG', quality=90)
+            encoded = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            response = self.client.with_options(timeout=timeout, max_retries=0).chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}]}])
+            if not response.choices:
+                raise ValueError("API returned no choices.")
+            text = response.choices[0].message.content
+        elif self.provider == "Gemini":
+            response = self.gemini_model.generate_content([prompt, image], request_options={"timeout": timeout, "retry": None})
+            text = response.text
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
+        return json.loads(clean_json_string(text))
 
     def consolidate_layout(self, descriptions):
         """
