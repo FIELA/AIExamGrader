@@ -1,6 +1,7 @@
 """
-Scores written in red on graded sheets (score_marks): what a sheet's marks say, when a sheet must not be marked, and
-that drawing never touches the scan and can always be told apart from an image edited afterwards.
+Scores written in red on graded sheets (score_marks): the tables each sheet gets (question number, score), what is
+flagged when a report does not add up (the sheet is marked all the same), and that drawing never touches the scan and
+can always be told apart from an image edited afterwards.
 """
 import io
 import math
@@ -63,66 +64,74 @@ def render(original, out, t, texts):
 class TestSheetMarks(unittest.TestCase):
     def test_marks_follow_the_saved_scores(self):
         marks = sm.sheet_marks(report([('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 2.5, 4)]), template())
-        self.assertTrue(marks.ok, marks.problems)
-        self.assertEqual(marks.texts, {sm.OBJECTIVE: '选择题 6分', '17(1)': '2分', '17(2)': '2.5分', sm.TOTAL: '总分 10.5分'})
+        self.assertEqual(marks.warnings, [])
+        self.assertEqual(marks.texts, {sm.OBJECTIVE: ['选择题', '6分'], '17(1)': ['17(1)', '2分'], '17(2)': ['17(2)', '2.5分'],
+                                       sm.TOTAL: ['总分', '10.5分']})
         changed = sm.sheet_marks(report([('1', 3), ('2', 0)], [('17(1)', 2, 4), ('17(2)', 2.5, 4)]), template())
         self.assertNotEqual(marks.digest, changed.digest)
         english = sm.sheet_marks(report([('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 0, 4)]), template(lang='EN'))
-        self.assertEqual(english.texts[sm.OBJECTIVE], 'MC 6 pts')
-        self.assertEqual(english.texts['17(2)'], '0 pts')
-        self.assertEqual(english.texts[sm.TOTAL], 'Total 8')
+        self.assertEqual(english.texts[sm.OBJECTIVE], ['MC', '6 pts'])
+        self.assertEqual(english.texts['17(2)'], ['17(2)', '0 pts'])
+        self.assertEqual(english.texts[sm.TOTAL], ['Total', '8 pts'])
 
     def test_the_review_objective_correction_counts_in_the_multiple_choice_total(self):
         data = report([('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 2, 4)], total=8)
         data['details'].append({'question_id': sm.OBJ_ADJ, 'type': '客观题修正', 'score': -2})
         marks = sm.sheet_marks(data, template())
-        self.assertTrue(marks.ok, marks.problems)
-        self.assertEqual(marks.texts[sm.OBJECTIVE], '选择题 4分')
+        self.assertEqual(marks.warnings, [])
+        self.assertEqual(marks.texts[sm.OBJECTIVE], ['选择题', '4分'])
         self.assertNotIn(sm.OBJ_ADJ, marks.texts)  # Not a sub-question of its own
 
-    def test_a_sub_question_the_model_skipped_is_missing_even_when_the_total_agrees(self):
+    def test_a_sub_question_the_model_skipped_is_written_as_missing_even_when_the_total_agrees(self):
         # The total left 17(2) out too, so only the template's question list shows it is missing
         marks = sm.sheet_marks(report([('1', 3), ('2', 3)], [('17(1)', 2, 4)]), template())
-        self.assertFalse(marks.ok)
-        self.assertIn(('mark_problem_missing', {'qids': '17(2)'}), marks.problems)
-        self.assertEqual(marks.texts, {})  # Nothing that looks complete
+        self.assertIn(('mark_problem_missing', {'qids': '17(2)'}), marks.warnings)
+        self.assertEqual(marks.texts['17(2)'], ['17(2)', sm.MISSING])  # Written, and plainly without a score
+        self.assertEqual(marks.texts[sm.TOTAL], ['总分', '8分'])
 
     def test_extra_repeated_and_full_width_ids(self):
         data = report([('1', 3), ('2', 3)], [('17（1）', 2, 4), ('17(1)', 1, 4), ('17(2)', 2, 4), ('20', 1, 5)])
-        keys = [key for key, _ in sm.sheet_marks(data, template()).problems]
+        marks = sm.sheet_marks(data, template())
+        keys = [key for key, _ in marks.warnings]
         self.assertIn('mark_problem_duplicate', keys)  # 17（1） is 17(1)
         self.assertIn('mark_problem_extra', keys)
+        self.assertEqual(marks.texts['17(1)'], ['17(1)', '2分'])  # The first of the repeated scores
+        self.assertNotIn('20', marks.texts)  # No position for it: in the warning only
         data = report([('1', 3), ('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 2, 4)])
-        self.assertIn('mark_problem_obj_duplicate', [key for key, _ in sm.sheet_marks(data, template()).problems])
+        self.assertIn('mark_problem_obj_duplicate', [key for key, _ in sm.sheet_marks(data, template()).warnings])
         data = report([('1', 3)], [('17(1)', 2, 4), ('17(2)', 2, 4)])
-        self.assertIn(('mark_problem_obj_missing', {'qids': '2'}), sm.sheet_marks(data, template()).problems)
+        self.assertIn(('mark_problem_obj_missing', {'qids': '2'}), sm.sheet_marks(data, template()).warnings)
 
     def test_the_total_must_equal_the_questions(self):
         marks = sm.sheet_marks(report([('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 2, 4)], total=11), template())
-        self.assertEqual(marks.problems, [('mark_problem_total', {'total': '11', 'sum': '10'})])
+        self.assertEqual(marks.warnings, [('mark_problem_total', {'total': '11', 'sum': '10'})])
+        self.assertEqual(marks.texts[sm.TOTAL], ['总分', '11分'])  # The total the report and the summary record
 
     def test_invalid_and_out_of_range_scores(self):
         for bad in (True, None, '2', math.nan, math.inf):
             data = report([('1', 3), ('2', 3)], [('17(1)', 2, 4), ('17(2)', 2, 4)])
             data['details'][2]['score'] = bad
-            keys = [key for key, _ in sm.sheet_marks(data, template()).problems]
-            self.assertIn('mark_problem_bad_score', keys, bad)
+            marks = sm.sheet_marks(data, template())
+            self.assertIn('mark_problem_bad_score', [key for key, _ in marks.warnings], bad)
+            self.assertEqual(marks.texts['17(1)'], ['17(1)', sm.MISSING])
         too_high = report([('1', 3), ('2', 3)], [('17(1)', 5, 4), ('17(2)', 2, 4)])
-        self.assertIn('mark_problem_range', [k for k, _ in sm.sheet_marks(too_high, template()).problems])
+        self.assertIn('mark_problem_range', [k for k, _ in sm.sheet_marks(too_high, template()).warnings])
         negative = report([('1', 3), ('2', 3)], [('17(1)', -1, 4), ('17(2)', 2, 4)])
-        self.assertIn('mark_problem_range', [k for k, _ in sm.sheet_marks(negative, template()).problems])
-        self.assertEqual(sm.sheet_marks({'details': [], 'total_score': 0}, template()).problems,
-                         [('mark_problem_no_details', {})])
+        self.assertIn('mark_problem_range', [k for k, _ in sm.sheet_marks(negative, template()).warnings])
+        empty = sm.sheet_marks({'details': [], 'total_score': 0}, template())
+        self.assertIn(('mark_problem_no_details', {}), empty.warnings)
+        self.assertEqual(empty.texts[sm.TOTAL], ['总分', '0分'])
+        self.assertEqual(empty.texts[sm.OBJECTIVE], ['选择题', sm.MISSING])
 
     def test_legacy_objective_total_and_absent_sheets(self):
         data = report((), [('17(1)', 2, 4), ('17(2)', 2, 4)], total=10, legacy_obj_score=6)
         marks = sm.sheet_marks(data, template())
-        self.assertTrue(marks.ok, marks.problems)
-        self.assertEqual(marks.texts[sm.OBJECTIVE], '选择题 6分')
+        self.assertEqual(marks.warnings, [])
+        self.assertEqual(marks.texts[sm.OBJECTIVE], ['选择题', '6分'])
         zeroed = sm.sheet_marks(report([('1', 0), ('2', 0)], [('17(1)', 0, 4), ('17(2)', 0, 4)]), template())
-        self.assertEqual(zeroed.texts[sm.TOTAL], '总分 0分')  # A sheet confirmed absent shows its zeros
+        self.assertEqual(zeroed.texts[sm.TOTAL], ['总分', '0分'])  # A sheet confirmed absent shows its zeros
         no_mc = sm.sheet_marks(report((), [('17(1)', 2, 4), ('17(2)', 2, 4)]), template(objective=()))
-        self.assertTrue(no_mc.ok)
+        self.assertEqual(no_mc.warnings, [])
         self.assertNotIn(sm.OBJECTIVE, no_mc.texts)
 
     def test_scores_are_written_plainly(self):
@@ -164,22 +173,26 @@ class TestTemplate(unittest.TestCase):
         del t['marks']['17(2)']
         self.assertEqual(sm.unplaced_marks(t), ['17(2)'])
 
-    def test_layout_fits_only_the_same_proportions(self):
-        t = template(size=(4233, 2970))
-        self.assertTrue(sm.layout_fits(t, (4145, 2949)))  # The sample sheets: under 2% apart
-        self.assertFalse(sm.layout_fits(t, (2970, 4233)))  # Turned
-        self.assertFalse(sm.layout_fits(t, (4233, 3300)))
+    def test_scans_cropped_differently_are_all_marked(self):
+        t = template(size=(2290, 3072))
+        for size in ((2022, 3072), (2520, 3072), (2290, 3072)):  # Widths of one exam's scans, 11% either way
+            self.assertTrue(sm.same_orientation(t, size))
+        self.assertFalse(sm.same_orientation(t, (3072, 2290)))  # Turned: marked, with a warning
 
     def test_layout_problems(self):
         t = template()
         texts = {m: v for m, v in sm.preview_texts(t).items()}
         font = sm.font_problem('CN')[0]
         self.assertEqual(sm.layout_problems(sm.mark_boxes(t, texts, (1200, 850), font), (1200, 850)), ([], []))
-        t['marks']['17(1)'] = {'x': 0.01, 'y': 0.45, 'anchor': 'rm'}  # Right-aligned at the left edge: outside
+        t['marks']['17(1)'] = {'x': 0.01, 'y': 0.45, 'anchor': 'rm'}  # Right-aligned at the left edge: would stick out
         t['marks']['17(2)'] = {'x': 0.6, 'y': 0.06, 'anchor': 'lm'}  # On top of the total
-        outside, overlaps = sm.layout_problems(sm.mark_boxes(t, texts, (1200, 850), font), (1200, 850))
+        boxes = sm.mark_boxes(t, texts, (1200, 850), font)
+        outside, overlaps = sm.layout_problems(boxes, (1200, 850))
         self.assertEqual(outside, ['17(1)'])
         self.assertEqual(overlaps, [('17(2)', sm.TOTAL)])
+        moved = next(b for b in boxes if b.mark_id == '17(1)')
+        self.assertLess(moved.wanted[0], 0)
+        self.assertEqual(moved.box[0], 0)  # Drawn whole, moved just inside the image
 
     def test_boxes_from_a_model(self):
         raw = {'title': [40, 300, 80, 700], 'objective': {'box_2d': [200, 250, 300, 500]},
@@ -297,6 +310,31 @@ class TestDrawing(unittest.TestCase):
             self.assertEqual(im.size, (1200, 850))
             self.assertIn(im.getexif().get(0x0112), (None, 1))
             self.assertEqual(tuple(round(v) for v in im.info.get('dpi')), (300, 300))
+
+    def test_each_mark_is_a_table_of_question_number_and_score(self):
+        font = sm.load_font(sm.font_problem('CN')[0], 40)
+        table = sm.table_image(['26(1)', '4分'], 40, font)
+        w, h = table.size
+        red = lambda p: p[0] > 200 and p[1] < 40 and p[2] < 40 and p[3] == 255
+        self.assertTrue(all(red(table.getpixel(p)) for p in ((0, 0), (w - 1, h - 1), (w // 2, 0), (0, h // 2))))  # Frame
+        dividers = [x for x in range(3, w - 3) if all(red(table.getpixel((x, y))) for y in range(h))]
+        self.assertTrue(dividers, 'a line between the two cells')
+        self.assertLess(dividers[0], w * 0.75)  # The question number's cell comes first
+        self.assertEqual(table.getpixel((dividers[0] - 3, 3))[:3], (255, 255, 255))  # Translucent white inside
+        self.assertEqual(table.getpixel((dividers[0] - 3, 3))[3], sm.BACKGROUND_ALPHA)
+        wider = sm.table_image(['26(1)', '10.5分'], 40, font)
+        self.assertGreater(wider.size[0], w)
+        self.assertEqual(wider.size[1], h)  # Same height whatever the score
+
+    def test_writing_under_a_table_still_shows(self):
+        image = Image.new('RGB', (1200, 850), 'white')
+        ImageDraw.Draw(image).rectangle((0, 300, 1200, 600), fill='black')  # An answer under every mark
+        t = template()
+        drawn = sm.draw_marks(image, t, self.texts(t), sm.font_problem('CN')[0])
+        box = next(b for b in sm.mark_boxes(t, self.texts(t), image.size, sm.font_problem('CN')[0]) if b.mark_id == '17(1)')
+        inside = drawn.getpixel((box.box[0] + 3, box.box[1] + 3))
+        self.assertTrue(all(150 < v < 250 for v in inside), inside)  # Lightened, not hidden
+        self.assertEqual(drawn.getpixel((1100, 450)), (0, 0, 0))  # Away from the marks: untouched
 
     def test_ink_under_a_mark(self):
         gray = Image.new('L', (100, 100), 255)

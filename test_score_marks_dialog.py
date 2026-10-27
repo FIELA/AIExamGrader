@@ -32,6 +32,8 @@ class DialogTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        for job in cls.root.tk.call('after', 'info'):  # customtkinter's own timers, not to fire on a destroyed root
+            cls.root.after_cancel(job)
         cls.root.destroy()
 
     def setUp(self):
@@ -103,23 +105,17 @@ class TestPlacing(DialogTest):
         self.assertEqual(result['reference']['size'], [1200, 850])
         self.assertEqual(result['reference']['sha256'], sm.file_sha256(self.sample))
 
-    def test_question_numbers_stay_beside_their_own_scores(self):
-        # Scores one answer row apart (3% of the height, as 17(1) and 17(2) on the sample sheets), at the size the
-        # sample is shown in the dialog (about 700 px high): no question number may cover another score
+    def test_each_preview_is_the_table_the_sheets_get(self):
         dialog = self.open(self.blank())
         self.place_all(dialog)
-        dialog.template['marks']['17(2)'] = dict(dialog.template['marks']['17(1)'])
-        dialog.template['marks']['17(2)']['y'] += 0.03
-        dialog.scale = 700 / 850
-        dialog.redraw()
+        cells = {box.mark_id: box.cells for box in dialog.boxes()}
+        self.assertEqual(cells[sm.TOTAL][0], '总分')
+        self.assertEqual(cells[sm.OBJECTIVE][0], '选择题')
+        self.assertEqual(cells['17(1)'], ['17(1)', '9.5分'])  # Its number, and the widest score it may show
         canvas = dialog.canvas
-        items = {m: {canvas.type(i): canvas.bbox(i) for i in canvas.find_withtag(tag)}
-                 for m, tag in dialog.tags.items() if m in dialog.template['marks']}
-        overlap = lambda a, b: a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
-        for mark_id, own in items.items():
-            for other, theirs in items.items():
-                if other != mark_id:
-                    self.assertFalse(overlap(own['text'], theirs['image']), f"{mark_id}'s number covers {other}")
+        kinds = [canvas.type(i) for i in canvas.find_all() if 'bg' not in canvas.gettags(i)]
+        self.assertEqual(kinds.count('image'), 4)  # One table per placed score...
+        self.assertEqual(kinds.count('text'), 0)  # ...and no separate numbers beside them
 
     def test_closing_the_window_before_grading_skips_for_now(self):
         dialog = self.open(self.blank())

@@ -200,24 +200,32 @@ class TestWriting(ServiceTest):
         self.assertEqual(self.service.status(json_path)[0], 'problem')
         self.assertTrue(any('外部修改' in line for line in self.app.logs), self.app.logs)
 
-    def test_a_sheet_with_problems_is_not_marked_at_all(self):
+    def test_a_sheet_whose_report_does_not_add_up_is_marked_and_flagged(self):
         json_path, data = self.exam.sheet('a.jpg')
-        self.exam.template()
+        t = self.exam.template()
         incomplete = dict(data)
         incomplete['details'] = [d for d in data['details'] if d['question_id'] != '17(2)']
         incomplete['total_score'] = data['total_score'] - 2
         self.service.commit_report(json_path, incomplete)
         self.assertTrue(self.service.drain())
-        self.assertIsNone(self.marker())
-        self.assertTrue(any('缺少小问 17(2)' in line for line in self.app.logs), self.app.logs)
+        marks = sm.sheet_marks(incomplete, t)
+        self.assertEqual(marks.texts['17(2)'], ['17(2)', sm.MISSING])
+        self.assertEqual(self.marker()['scores'], marks.digest)  # Written, with the missing score plainly missing
+        self.assertTrue(any('已回写分值' in line and '缺少小问 17(2)' in line for line in self.app.logs), self.app.logs)
+        self.assertEqual(self.service.scan(queue=False), {'ok': 1, 'stale': 0, 'warned': 1, 'not_archived': 0})
 
-    def test_another_layout_is_not_marked(self):
-        json_path, data = self.exam.sheet('a.jpg', size=(850, 1200))  # Portrait; the template's sample is landscape
+    def test_scans_cropped_or_turned_differently_are_marked(self):
+        narrow, data_narrow = self.exam.sheet('narrow.jpg', size=(1080, 850))  # 10% narrower than the sample
+        turned, data_turned = self.exam.sheet('turned.jpg', size=(850, 1200))  # Portrait; the sample is landscape
         self.exam.template()
-        self.service.commit_report(json_path, data)
+        self.service.commit_report(narrow, data_narrow)
+        self.service.commit_report(turned, data_turned)
         self.assertTrue(self.service.drain())
-        self.assertIsNone(self.marker())
-        self.assertIn('版式不符', self.service.status(json_path)[1])
+        self.assertIsNotNone(self.marker('narrow.jpg'))
+        self.assertIsNotNone(self.marker('turned.jpg'))
+        warnings = [line for line in self.app.logs if '方向' in line]
+        self.assertEqual(len(warnings), 1, self.app.logs)  # Only the turned one, flagged
+        self.assertIn('turned.jpg', warnings[0])
 
 
 class TestStopping(ServiceTest):

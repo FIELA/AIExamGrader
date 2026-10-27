@@ -6,14 +6,13 @@
 
 """
 Where each score is written, set once per exam on a sample scan (see score_marks). The marks are shown as the sheets
-will get them (real font, size and the longest score they may show), each with its question number in blue.
+will get them: the same tables (question number, then the longest score it may show), font and size.
 """
 
 import copy
 import os
 import threading
 import tkinter as tk
-from tkinter import font as tkfont
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -23,7 +22,7 @@ import score_marks as sm
 from theme import Theme
 
 CHAIN, MANAGE = 'chain', 'manage'  # Opened before grading starts, or from the main window
-INK_WARNING = 0.08  # Share of dark pixels under a mark above which it may cover the answer
+INK_WARNING = 0.12  # Share of dark pixels under a table above which it may cover writing (a printed line is less)
 DEFAULT_ANCHOR = {sm.TOTAL: 'mm'}  # Others: the score ends where it is placed, left of the question number
 
 
@@ -81,8 +80,15 @@ class ScoreMarksDialog(ctk.CTkToplevel):
         else:
             self.lbl_warn.configure(text=t("msg_marks_no_samples"))
         self.transient(master)
-        self.after(80, self.fit)
-        self.after(120, self._grab)
+        self._jobs = [self.after(80, self.fit), self.after(120, self._grab)]
+
+    def destroy(self):
+        for job in getattr(self, '_jobs', []):
+            try:
+                self.after_cancel(job)  # Not to run on a closed window
+            except tk.TclError:
+                pass
+        super().destroy()
 
     def _grab(self):
         try:
@@ -258,34 +264,24 @@ class ScoreMarksDialog(ctk.CTkToplevel):
         return sm.mark_boxes(self.template, texts, self.size, self.font_path)
 
     def draw_marks(self):
-        for tag in ("mark", "label", "frame"):
+        for tag in ("mark", "frame"):
             self.canvas.delete(tag)
         self.photos = {}
         boxes = self.boxes() if self.sample else []
         flagged = self.check(boxes)
-        for mark_id, text, xy, anchor, px, _ in boxes:
-            size = max(6, round(px * self.scale))
-            font, stroke = self.font_at(size), sm.stroke_width(size)
-            left, top, right, bottom = font.getbbox(text, anchor=anchor, stroke_width=stroke)
-            image = Image.new('RGBA', (max(1, right - left), max(1, bottom - top)), (0, 0, 0, 0))
-            ImageDraw.Draw(image).text((-left, -top), text, font=font, fill=tuple(self.template['color']) + (255,),
-                                       anchor=anchor, stroke_width=stroke, stroke_fill=(255, 255, 255, 255))
-            self.photos[mark_id] = ImageTk.PhotoImage(image)
-            x, y = xy[0] * self.scale, xy[1] * self.scale
-            tag = self.tag_for(mark_id)
-            self.canvas.create_image(x + left, y + top, anchor="nw", image=self.photos[mark_id], tags=("mark", tag))
-            # The question number beside its own score, never over the scores above or below: left of it, or right
-            # of it at the image's left edge
-            label, label_font = self.label(mark_id), ("Arial", 10, "bold")
-            middle = y + (top + bottom) / 2
-            if x + left - 4 - tkfont.Font(font=label_font).measure(label) >= 0:
-                spot, side = (x + left - 4, middle), "e"
-            else:
-                spot, side = (x + right + 4, middle), "w"
-            self.canvas.create_text(*spot, text=label, anchor=side, fill="#2563EB", font=label_font, tags=("label", tag))
-            if mark_id == self.selected or mark_id in flagged:
-                self.canvas.create_rectangle(x + left - 2, y + top - 2, x + right + 2, y + bottom + 2, width=2,
-                                             outline="#2563EB" if mark_id == self.selected else Theme.WARNING,
+        color = tuple(self.template['color'])
+        for box in boxes:
+            # As the sheets get it: the same table at the scale shown, where the sheets have it (kept inside the image)
+            size = max(6, round(box.px * self.scale))
+            image = sm.table_image(box.cells, size, self.font_at(size), color)
+            self.photos[box.mark_id] = ImageTk.PhotoImage(image)
+            left, top = box.box[0] * self.scale, box.box[1] * self.scale
+            right, bottom = left + image.size[0], top + image.size[1]
+            tag = self.tag_for(box.mark_id)
+            self.canvas.create_image(left, top, anchor="nw", image=self.photos[box.mark_id], tags=("mark", tag))
+            if box.mark_id == self.selected or box.mark_id in flagged:
+                self.canvas.create_rectangle(left - 2, top - 2, right + 2, bottom + 2, width=2,
+                                             outline="#2563EB" if box.mark_id == self.selected else Theme.WARNING,
                                              tags=("frame", tag))
         self.refresh_items()
 
@@ -305,7 +301,7 @@ class ScoreMarksDialog(ctk.CTkToplevel):
         if overlaps:
             notes.append(t("lbl_marks_warn_overlap", pairs='、'.join(f"{self.label(a)}/{self.label(b)}" for a, b in overlaps)))
             flagged.update(m for pair in overlaps for m in pair)
-        inky = [b[0] for b in boxes if self.gray is not None and sm.ink_ratio(self.gray, b[5]) > INK_WARNING]
+        inky = [b.mark_id for b in boxes if self.gray is not None and sm.ink_ratio(self.gray, b.box) > INK_WARNING]
         if inky:
             notes.append(t("lbl_marks_warn_ink", ids='、'.join(self.label(m) for m in inky)))
             flagged.update(inky)
@@ -495,9 +491,6 @@ class ScoreMarksDialog(ctk.CTkToplevel):
             return self.t("msg_marks_font_missing")
         if not self.sample:
             return self.t("msg_marks_no_samples")
-        outside, _ = sm.layout_problems(self.boxes(), self.size)
-        if outside:
-            return self.t("lbl_marks_warn_outside", ids='、'.join(self.label(m) for m in outside))
         return None
 
     def result(self):

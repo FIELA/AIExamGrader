@@ -132,10 +132,12 @@ class ScoreMarksService:
         path = os.path.join(self.folder(exam, 'success'), name) if name else None
         return path if path and os.path.isfile(path) else None
 
-    def font(self, lang):
-        if lang not in self._fonts:
-            self._fonts[lang] = sm.font_problem(lang)
-        return self._fonts[lang]
+    def font(self, lang, extra=''):
+        """(font path, missing) for the cells in lang with the question numbers in extra."""
+        key = (lang, ''.join(sorted(set(extra))))
+        if key not in self._fonts:
+            self._fonts[key] = sm.font_problem(lang, extra)
+        return self._fonts[key]
 
     # --- Committing reports ---
 
@@ -249,10 +251,8 @@ class ScoreMarksService:
             if not template:
                 return
         image = record_image_name(data) or os.path.basename(json_path)
-        marks = sm.sheet_marks(data, template)
-        if not marks.ok:
-            self._problem(json_path, image, marks.problems)
-            return
+        marks = sm.sheet_marks(data, template)  # Written even when its report does not add up; the log says what
+        warnings = list(marks.warnings)
         archive = self.archive_path(exam, data)
         if not archive:
             self._set(json_path, 'not_archived')  # Queued again once it is moved to the success folder
@@ -266,9 +266,9 @@ class ScoreMarksService:
             if sm.normalized_size(archive) != size:
                 self._problem(json_path, image, [('mark_problem_size', {'file': os.path.basename(original)})])
                 return
-            if not sm.layout_fits(template, size):
-                self._problem(json_path, image, [('mark_problem_layout', {})])
-                return
+            if not sm.same_orientation(template, size):
+                warnings.append(('mark_problem_layout', {}))  # Marked all the same: each mark names its question
+            self._warn(json_path, image, warnings)
             original_sha = sm.file_sha256(original)
             before = self._stat(archive)  # Taken before the check, so that any later change is seen at publishing
             state = sm.classify_archive(archive, original, original_sha)
@@ -281,7 +281,7 @@ class ScoreMarksService:
                     and marker.get('renderer') == sm.RENDERER:
                 self._set(json_path, 'ok')
                 return
-            font_path, missing = self.font(template['lang'])
+            font_path, missing = self.font(template['lang'], ''.join((template.get('items') or {}).get('subjective') or []))
             if missing:
                 self._problem(json_path, image, [('mark_problem_font', {})])
                 return
@@ -316,7 +316,7 @@ class ScoreMarksService:
                     self._set(json_path, 'removed')
                     return
                 now = sm.sheet_marks(data, template)
-                if not now.ok or now.digest != digest:
+                if now.digest != digest:
                     self.enqueue(json_path, exam)  # Scores changed while drawing: draw the new ones
                     return
                 path = self.archive_path(exam, data)  # Its name now, after any renaming
@@ -378,11 +378,21 @@ class ScoreMarksService:
         self._status[os.path.abspath(json_path)] = (status, message)
 
     def _problem(self, json_path, image, problems):
+        """Something that keeps the sheet from being marked (no scan to draw on, an image changed elsewhere ...)."""
         message = '；'.join(self.app.t(key, **values) for key, values in problems)
         self._set(json_path, 'problem', message)
         if (json_path, message) not in self._logged:
             self._logged.add((json_path, message))
             self._log('log_marks_problem', image=image, reason=message)
+
+    def _warn(self, json_path, image, warnings):
+        """What does not add up on a sheet that is marked all the same, logged once per report and message."""
+        if not warnings:
+            return
+        message = '；'.join(self.app.t(key, **values) for key, values in warnings)
+        if (json_path, message) not in self._logged:
+            self._logged.add((json_path, message))
+            self._log('log_marks_warning', image=image, reason=message)
 
     def _log(self, key, **values):
         self.app.ui_after(0, self.app.log, self.app.t(key, **values))
@@ -416,10 +426,11 @@ class ScoreMarksService:
     def scan(self, exam=None, queue=True):
         """
         Compare each graded image's marker (its header only) with its report and the template, queue those out of
-        date, and return the counts: 'ok', 'stale', 'problem' (scores or scan missing) and 'not_archived'.
+        date, and return the counts: 'ok', 'stale', 'not_archived', and 'warned' (sheets whose report does not add
+        up; they are marked all the same).
         """
         exam = self._exam(exam)
-        counts = {'ok': 0, 'stale': 0, 'problem': 0, 'not_archived': 0}
+        counts = {'ok': 0, 'stale': 0, 'warned': 0, 'not_archived': 0}
         template, _ = self.load_template(exam)
         if not template or template.get('status') not in (sm.ENABLED, sm.PENDING):
             return counts
@@ -430,10 +441,8 @@ class ScoreMarksService:
                 counts['not_archived'] += 1
                 continue
             marks = sm.sheet_marks(data, template) if template['status'] == sm.ENABLED else None
-            if marks is not None and not marks.ok:
-                counts['problem'] += 1
-                self._problem(json_path, record_image_name(data), marks.problems)
-                continue
+            if marks is not None and marks.warnings:
+                counts['warned'] += 1
             marker = sm.read_marker(archive)
             if marks is not None and marker and marker.get('scores') == marks.digest and \
                     marker.get('tpl') == tpl_hash and marker.get('renderer') == sm.RENDERER:
@@ -454,7 +463,7 @@ class ScoreMarksService:
             self.cleanup_temp(exam)
             counts = self.scan(exam)
             if report and any(counts.values()):
-                self._log('log_marks_scan', ok=counts['ok'], stale=counts['stale'], problem=counts['problem'])
+                self._log('log_marks_scan', ok=counts['ok'], stale=counts['stale'], warned=counts['warned'])
         self._add_job(job)
 
     def cleanup_temp(self, exam=None):

@@ -8,10 +8,15 @@
 Scores written in red onto graded answer sheets: the multiple-choice total, each sub-question and the total, at the
 positions of one template per exam. Pure functions (no Tk, no API); see score_marks_service for when they run.
 
+Each mark is a one-row table, question number then score (e.g. 26(1) | 4分), so a score still reads as its question's
+when a scan is shifted from the template's sample. Every sheet is marked: a score the report lacks shows MISSING and
+what does not add up is returned as warnings for the log.
+
 A marked image carries a marker (JPEG comment / PNG text) with the SHA-256 of its decoded pixels, so a marked image
 edited afterwards (editors keep the marker) is told apart from one this module wrote.
 """
 
+import collections
 import hashlib
 import io
 import json
@@ -25,7 +30,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, PngImagePlugin
 from translations import TRANSLATIONS
 
 SCHEMA = 1
-RENDERER = 1  # Bump when the drawing changes, so that sheets drawn before are redrawn
+RENDERER = 2  # Bump when the drawing changes, so that sheets drawn before are redrawn (2: tables)
 MARKER_KEY = 'AIExamGrader-marks'
 JPEG_PREFIX = b'AIExamGrader-marks '
 JPEG_QUALITY = 93
@@ -41,7 +46,9 @@ SIZE_QUESTION = 0.019  # Font size as a share of sqrt(width x height): about 67 
 SIZE_TOTAL = 0.030
 SIZE_RANGE = (0.006, 0.08)
 COLOR = (220, 0, 0)
-ASPECT_TOLERANCE = 0.04  # A sheet whose width/height differs more from the template's sample is not marked
+MISSING = '—'  # A score the report lacks or cannot be read
+CELL_PADDING = (0.30, 0.14)  # Around the text of a table cell, as shares of the font size (across, down)
+BACKGROUND_ALPHA = 215  # White behind a table (of 255): legible over printed lines and writing, which still show
 
 FONT_CANDIDATES = (
     '/System/Library/Fonts/STHeiti Medium.ttc',
@@ -134,20 +141,20 @@ def format_score(value):
 
 
 def mark_texts(lang):
+    """(score format, multiple-choice label, total label) in the template's language."""
     texts = TRANSLATIONS.get(lang) or TRANSLATIONS['CN']
-    return texts['mark_text_question'], texts['mark_text_objective'], texts['mark_text_total']
+    return texts['mark_cell_score'], texts['mark_cell_objective'], texts['mark_cell_total']
 
 
 class SheetMarks:
-    """What one sheet's marks say: texts by mark id, or the problems that keep the sheet from being marked."""
+    """
+    What one sheet's marks say: cells [question number, score] by mark id, and warnings (translation key, values)
+    about what does not add up in its report. Warnings do not keep the sheet from being marked.
+    """
 
-    def __init__(self, texts, problems):
+    def __init__(self, texts, warnings):
         self.texts = texts
-        self.problems = problems
-
-    @property
-    def ok(self):
-        return not self.problems
+        self.warnings = warnings
 
     @property
     def digest(self):
@@ -172,26 +179,29 @@ def _id_problems(found, expected, keys):
 
 def sheet_marks(data, template):
     """
-    The marks for a saved report, checked against the template's question list rather than the report's own items:
-    a sub-question the model skipped is reported missing even when the total left it out too. The total must equal
-    the multiple-choice total plus the sub-questions. Any problem means the sheet is not marked at all.
+    The cells for a saved report, one per mark of the template (the template's question list, not the report's own
+    items): [question number, score]. Every mark gets a cell, MISSING when the report has no readable score for it.
+    Warnings name what does not add up: questions the report misses, adds or repeats, scores out of range, a total
+    that is not the multiple-choice total plus the sub-questions (the total shown is the one the report records).
     """
-    fmt_question, fmt_objective, fmt_total = mark_texts(template.get('lang', 'CN'))
+    fmt_score, objective_label, total_label = mark_texts(template.get('lang', 'CN'))
+    score_text = lambda value: fmt_score.format(score=format_score(value))
     items = template.get('items') or {}
     expected_objective, expected_subjective = items.get('objective') or [], items.get('subjective') or []
-    problems = []
+    warnings = []
     details = data.get('details') if isinstance(data, dict) else None
     if not isinstance(details, list) or not details:
-        return SheetMarks({}, [('mark_problem_no_details', {})])
+        details = []
+        warnings.append(('mark_problem_no_details', {}))
 
     objective_ids, objective_scores, subjective_ids, subjective = [], [], [], {}
     for item in details:
         if not isinstance(item, dict) or item.get('question_id') in (None, ''):
-            problems.append(('mark_problem_bad_item', {}))
+            warnings.append(('mark_problem_bad_item', {}))
             continue
         qid, score = normalize_qid(item['question_id']), item.get('score')
         if not is_number(score):
-            problems.append(('mark_problem_bad_score', {'qid': item['question_id']}))
+            warnings.append(('mark_problem_bad_score', {'qid': item['question_id']}))
             continue
         if is_objective(item):
             objective_scores.append(score)
@@ -199,62 +209,61 @@ def sheet_marks(data, template):
                 objective_ids.append(qid)
         else:
             subjective_ids.append(qid)
-            subjective[qid] = score
+            subjective.setdefault(qid, score)  # A repeated question shows its first score, and a warning
             top = item.get('max_score')
             if score < 0 or (is_number(top) and score > top + 1e-9):
-                problems.append(('mark_problem_range', {'qid': item['question_id'], 'score': format_score(score),
+                warnings.append(('mark_problem_range', {'qid': item['question_id'], 'score': format_score(score),
                                                         'max': format_score(top) if is_number(top) else '-'}))
-
-    problems += _id_problems(subjective_ids, expected_subjective,
+    warnings += _id_problems(subjective_ids, expected_subjective,
                              ('mark_problem_missing', 'mark_problem_extra', 'mark_problem_duplicate'))
-    texts = {}
+
+    cells = {}
+    if objective_scores:
+        objective_total = sum(objective_scores)
+    elif is_number((data or {}).get('legacy_obj_score')):
+        objective_total = data['legacy_obj_score']  # Reports from before per-question details
+    else:
+        objective_total = None
     if expected_objective:
         if objective_scores:
-            problems += _id_problems(objective_ids, expected_objective,
+            warnings += _id_problems(objective_ids, expected_objective,
                                      ('mark_problem_obj_missing', 'mark_problem_obj_extra', 'mark_problem_obj_duplicate'))
-            objective_total = sum(objective_scores)
-        elif is_number(data.get('legacy_obj_score')):
-            objective_total = data['legacy_obj_score']  # Reports from before per-question details
-        else:
-            problems.append(('mark_problem_no_objective', {}))
-            objective_total = 0
-        if objective_total < 0:
-            problems.append(('mark_problem_range', {'qid': OBJECTIVE, 'score': format_score(objective_total), 'max': '-'}))
-        texts[OBJECTIVE] = fmt_objective.format(score=format_score(objective_total))
-    else:
-        if objective_scores:
-            problems.append(('mark_problem_obj_extra', {'qids': '、'.join(sorted(set(objective_ids), key=qid_sort_key)) or OBJ_ADJ}))
-        objective_total = 0
-
-    total = data.get('total_score')
-    if not is_number(total):
-        problems.append(('mark_problem_bad_score', {'qid': 'total_score'}))
-    elif abs(total - (objective_total + sum(subjective.values()))) > 1e-6:
-        problems.append(('mark_problem_total', {'total': format_score(total),
-                                                'sum': format_score(objective_total + sum(subjective.values()))}))
-    if problems:
-        return SheetMarks({}, problems)
+        if objective_total is None:
+            warnings.append(('mark_problem_no_objective', {}))
+        elif objective_total < 0:
+            warnings.append(('mark_problem_range', {'qid': objective_label, 'score': format_score(objective_total), 'max': '-'}))
+        cells[OBJECTIVE] = [objective_label, MISSING if objective_total is None else score_text(objective_total)]
+    elif objective_scores:
+        warnings.append(('mark_problem_obj_extra', {'qids': '、'.join(sorted(set(objective_ids), key=qid_sort_key)) or OBJ_ADJ}))
     for qid in expected_subjective:
-        texts[qid] = fmt_question.format(score=format_score(subjective[qid]))
-    texts[TOTAL] = fmt_total.format(score=format_score(total))
-    return SheetMarks(texts, [])
+        cells[qid] = [qid, score_text(subjective[qid]) if qid in subjective else MISSING]
+
+    total = (data or {}).get('total_score')
+    if is_number(total):
+        parts = (objective_total or 0) + sum(s for q, s in subjective.items())
+        if abs(total - parts) > 1e-6:
+            warnings.append(('mark_problem_total', {'total': format_score(total), 'sum': format_score(parts)}))
+        cells[TOTAL] = [total_label, score_text(total)]
+    else:
+        warnings.append(('mark_problem_bad_score', {'qid': 'total_score'}))
+        cells[TOTAL] = [total_label, MISSING]
+    return SheetMarks(cells, warnings)
 
 
 def preview_texts(template, max_scores=None):
-    """The longest text each mark may show (its full score less half a point), for checking the layout."""
-    fmt_question, fmt_objective, fmt_total = mark_texts(template.get('lang', 'CN'))
+    """The widest cells each mark may show (its full score less half a point), for checking the layout."""
+    fmt_score, objective_label, total_label = mark_texts(template.get('lang', 'CN'))
     items = template.get('items') or {}
     max_scores = max_scores or {}
-    longest = lambda top: format_score(top - 0.5) if top >= 1 else format_score(top)
+    longest = lambda top: fmt_score.format(score=format_score(top - 0.5) if top >= 1 else format_score(top))
     texts = {}
     if items.get('objective'):
-        top = sum(max_scores.get(q, 3) for q in items['objective'])
-        texts[OBJECTIVE] = fmt_objective.format(score=longest(top))
+        texts[OBJECTIVE] = [objective_label, longest(sum(max_scores.get(q, 3) for q in items['objective']))]
     for qid in items.get('subjective') or []:
-        texts[qid] = fmt_question.format(score=longest(max_scores.get(qid, 10)))
+        texts[qid] = [qid, longest(max_scores.get(qid, 10))]
     top = sum(max_scores.get(q, 3) for q in items.get('objective') or []) + \
         sum(max_scores.get(q, 10) for q in items.get('subjective') or [])
-    texts[TOTAL] = fmt_total.format(score=longest(max(top, 100)))
+    texts[TOTAL] = [total_label, longest(max(top, 100))]
     return texts
 
 
@@ -318,14 +327,16 @@ def new_template(items, lang, reference_size, reference_image='', reference_sha2
             'reference': {'image': reference_image, 'sha256': reference_sha256, 'size': list(reference_size)}}
 
 
-def layout_fits(template, size):
-    """Same orientation and nearly the same width/height as the template's sample; it does not prove alignment."""
+def same_orientation(template, size):
+    """
+    Whether a sheet is upright the way the template's sample is (both portrait or both landscape). Scans cropped
+    differently are marked all the same, their marks a little off; a turned one gets a warning, as its marks may be
+    far from their questions.
+    """
     ref = (template.get('reference') or {}).get('size') or [0, 0]
     if not (ref[0] and ref[1] and size[0] and size[1]):
-        return False
-    if (ref[0] >= ref[1]) != (size[0] >= size[1]):
-        return False
-    return abs((size[0] / size[1]) / (ref[0] / ref[1]) - 1) <= ASPECT_TOLERANCE
+        return True
+    return (ref[0] >= ref[1]) == (size[0] >= size[1])
 
 
 def ids_match(template, data):
@@ -352,10 +363,6 @@ def font_size(template, mark_id, size):
     return max(10, round(share * math.sqrt(size[0] * size[1])))
 
 
-def stroke_width(px):
-    return max(1, round(px / 22))
-
-
 def load_font(path, px):
     if path:
         return ImageFont.truetype(path, px)
@@ -380,8 +387,8 @@ def has_glyphs(font, text):
 
 def find_font(text, candidates=FONT_CANDIDATES):
     """
-    The first installed font that draws all of text; None when none does. For text in ASCII only, None also means
-    Pillow's own font will do (see font_problem).
+    The first installed font that draws all of text; None when none does (Pillow's own font may still do, see
+    font_problem).
     """
     for path in candidates:
         if not os.path.isfile(path):
@@ -394,12 +401,20 @@ def find_font(text, candidates=FONT_CANDIDATES):
     return None
 
 
-def font_problem(lang, candidates=FONT_CANDIDATES):
-    """(font path, missing) for the template's language; missing is True when the texts cannot be drawn."""
-    sample = ''.join(mark_texts(lang)).replace('{score}', '0123456789.')
+def font_problem(lang, extra='', candidates=FONT_CANDIDATES):
+    """
+    (font path, missing) for the template's language and the question numbers in extra; missing is True when the
+    cells cannot be drawn.
+    """
+    sample = ''.join(mark_texts(lang)).replace('{score}', '0123456789.') + extra  # MISSING: see _cell_text
     path = find_font(sample, candidates)
-    if path or sample.isascii():
+    if path:
         return path, False
+    try:  # Pillow's own font, which draws Latin text
+        if has_glyphs(load_font(None, 32), sample):
+            return None, False
+    except (OSError, ValueError):
+        pass
     return None, True
 
 
@@ -503,30 +518,83 @@ def classify_archive(archive, original, original_sha256=None):
         return 'foreign'
 
 
+class MarkBox(collections.namedtuple('MarkBox', 'mark_id cells xy anchor px box wanted')):
+    """
+    A placed mark: its cells, anchor point and anchor, font size, and the table's box (left, top, right, bottom) as
+    drawn, kept inside the image; wanted is where the anchor alone would put it, which may stick out.
+    """
+
+
+def _font_height(font):
+    try:
+        ascent, descent = font.getmetrics()
+        return ascent + descent
+    except AttributeError:  # Pillow's old bitmap font
+        return font.getbbox('0')[3]
+
+
+def _cell_text(font, text):
+    """A cell's text as drawn: MISSING becomes '-' in a font without it (Pillow's own font has no dash)."""
+    return '-' if text == MISSING and not has_glyphs(font, MISSING) else text
+
+
+def _table_layout(cells, px, font):
+    """(width, height, line, padding across, padding down, first cell width) of a one-row table."""
+    pad_x, pad_y = max(1, round(CELL_PADDING[0] * px)), max(1, round(CELL_PADDING[1] * px))
+    line = max(1, round(px / 16))
+    first = round(font.getlength(_cell_text(font, cells[0]))) + 2 * pad_x
+    second = round(font.getlength(_cell_text(font, cells[1]))) + 2 * pad_x
+    return first + second + 3 * line, _font_height(font) + 2 * pad_y + 2 * line, line, pad_x, pad_y, first
+
+
+def table_image(cells, px, font, color=COLOR):
+    """A one-row table, question number then score, in red on translucent white."""
+    width, height, line, pad_x, pad_y, first = _table_layout(cells, px, font)
+    image = Image.new('RGBA', (width, height), (255, 255, 255, BACKGROUND_ALPHA))
+    draw = ImageDraw.Draw(image)
+    red = tuple(color) + (255,)
+    draw.rectangle((0, 0, width - 1, height - 1), outline=red, width=line)
+    draw.rectangle((line + first, 0, 2 * line + first - 1, height - 1), fill=red)
+    draw.text((line + pad_x, line + pad_y), _cell_text(font, cells[0]), font=font, fill=red)
+    draw.text((2 * line + first + pad_x, line + pad_y), _cell_text(font, cells[1]), font=font, fill=red)
+    return image
+
+
+def _anchored(anchor, xy, width, height):
+    across, down = anchor[0], anchor[1]
+    left = xy[0] - width if across == 'r' else xy[0] - width / 2 if across == 'm' else xy[0]
+    top = xy[1] - height if down == 'b' else xy[1] - height / 2 if down == 'm' else xy[1]
+    return round(left), round(top)
+
+
 def mark_boxes(template, texts, size, font_path, fonts=None):
-    """(mark id, text, (x, y), anchor, px, box) for each placed mark; box is (left, top, right, bottom) in pixels."""
+    """A MarkBox for each placed mark of texts (mark id -> [question number, score]), in pixels of an image of size."""
     fonts = {} if fonts is None else fonts
     boxes = []
-    for mark_id, text in texts.items():
+    for mark_id, cells in texts.items():
         pos = (template.get('marks') or {}).get(mark_id)
         if not pos:
             continue
         px = font_size(template, mark_id, size)
         font = fonts.get(px) or fonts.setdefault(px, load_font(font_path, px))
+        width, height = _table_layout(cells, px, font)[:2]
         xy = (pos['x'] * size[0], pos['y'] * size[1])
-        left, top, right, bottom = font.getbbox(text, anchor=pos['anchor'], stroke_width=stroke_width(px))
-        boxes.append((mark_id, text, xy, pos['anchor'], px, (xy[0] + left, xy[1] + top, xy[0] + right, xy[1] + bottom)))
+        left, top = _anchored(pos['anchor'], xy, width, height)
+        wanted = (left, top, left + width, top + height)
+        left = min(max(0, left), max(0, size[0] - width))  # A shifted scan moves its marks; keep them whole
+        top = min(max(0, top), max(0, size[1] - height))
+        boxes.append(MarkBox(mark_id, cells, xy, pos['anchor'], px, (left, top, left + width, top + height), wanted))
     return boxes
 
 
 def layout_problems(boxes, size):
-    """Marks partly outside the image, and pairs of marks that overlap."""
-    outside = [b[0] for b in boxes if b[5][0] < 0 or b[5][1] < 0 or b[5][2] > size[0] or b[5][3] > size[1]]
+    """Marks that would stick out of the image where they are placed (they are drawn moved inside it), and overlaps."""
+    outside = [b.mark_id for b in boxes if b.wanted[0] < 0 or b.wanted[1] < 0 or b.wanted[2] > size[0] or b.wanted[3] > size[1]]
     overlaps = []
     for i, a in enumerate(boxes):
         for b in boxes[i + 1:]:
-            if a[5][0] < b[5][2] and b[5][0] < a[5][2] and a[5][1] < b[5][3] and b[5][1] < a[5][3]:
-                overlaps.append((a[0], b[0]))
+            if a.box[0] < b.box[2] and b.box[0] < a.box[2] and a.box[1] < b.box[3] and b.box[1] < a.box[3]:
+                overlaps.append((a.mark_id, b.mark_id))
     return outside, overlaps
 
 
@@ -541,17 +609,14 @@ def ink_ratio(gray, box, threshold=128):
 
 
 def draw_marks(image, template, texts, font_path):
-    """image with the marks drawn on a copy, in red with a thin white outline, in a mode that can show red."""
-    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
-        canvas, fill = image.convert('RGBA'), tuple(template.get('color') or COLOR) + (255,)
-    else:
-        canvas, fill = image.convert('RGB'), tuple(template.get('color') or COLOR)
-    draw = ImageDraw.Draw(canvas)
+    """image with the marks drawn on a copy, as red tables, in a mode that can show red (with any transparency kept)."""
+    keep_alpha = image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info)
+    canvas = image.convert('RGBA')
     fonts = {}
-    for mark_id, text, xy, anchor, px, _ in mark_boxes(template, texts, canvas.size, font_path, fonts):
-        draw.text(xy, text, font=fonts[px], fill=fill, anchor=anchor,
-                  stroke_width=stroke_width(px), stroke_fill=(255, 255, 255) + ((255,) if canvas.mode == 'RGBA' else ()))
-    return canvas
+    color = tuple(template.get('color') or COLOR)
+    for box in mark_boxes(template, texts, canvas.size, font_path, fonts):
+        canvas.alpha_composite(table_image(box.cells, box.px, fonts[box.px], color), (box.box[0], box.box[1]))
+    return canvas if keep_alpha else canvas.convert('RGB')
 
 
 def encode_marked(image, info, fmt, marker):
@@ -647,9 +712,7 @@ def anchors_from_boxes(template, boxes, size, font_path):
     title = boxes.get('title')
     if title:
         total_px = font_size(template, TOTAL, size)
-        text = preview_texts(template)[TOTAL]
-        font = load_font(font_path, total_px)
-        width = font.getbbox(text, stroke_width=stroke_width(total_px))[2] / w
+        width = _table_layout(preview_texts(template)[TOTAL], total_px, load_font(font_path, total_px))[0] / w
         gap_t = 0.5 * total_px / w
         y = (title[0] + title[2]) / 2000
         if title[3] / 1000 + gap_t + width <= 1:
