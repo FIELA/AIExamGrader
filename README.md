@@ -42,15 +42,31 @@ AI Exam Grader grades handwritten answer sheets with a vision model from OpenAI 
 
 ## 🚀 Install and Run
 
-Requires Python 3.10 or later, on macOS, Windows or Linux.
+Requires Python 3.10 or later, on macOS, Windows or Linux. Check with `python3 --version` (on Windows, `python --version`): the `python3` that comes with macOS may be older than 3.10, in which case install a newer one from [python.org](https://www.python.org/downloads/).
+
+Install the dependencies in a virtual environment, `.venv` in the project folder, so they stay apart from the system Python. On macOS / Linux:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Then start the app in the same terminal:
 
 ```bash
 python AutoGrader.py
 ```
+
+In a new terminal, activate the environment again before running (the `activate` line above); a `ModuleNotFoundError` on start usually means it is not activated. On macOS / Linux, `./run.sh` starts the app with `.venv` without activating it.
 
 In the left panel, enter your API key, the provider (OpenAI / Gemini), the model name and, if needed, a base URL. Alternatively, copy `config_example.json` to `config.json` and fill it in; see [README_CONFIG.md](README_CONFIG.md).
 

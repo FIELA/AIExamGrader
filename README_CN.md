@@ -42,15 +42,31 @@
 
 ## 🚀 安装与运行
 
-需要 Python 3.10 及以上，macOS、Windows、Linux 均可。
+需要 Python 3.10 及以上，macOS、Windows、Linux 均可。可以用 `python3 --version`（Windows 上用 `python --version`）查看版本；macOS 自带的 `python3` 可能低于 3.10，这时请从 [python.org](https://www.python.org/downloads/) 安装新版本。
+
+依赖安装在项目目录下的虚拟环境 `.venv` 中，与系统 Python 互不影响。macOS / Linux：
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Windows：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+然后在同一个终端中启动：
 
 ```bash
 python AutoGrader.py
 ```
+
+新开终端时，先重新激活虚拟环境（即上面 `activate` 那一行）再运行；启动时报 `ModuleNotFoundError`，通常就是没有激活。macOS / Linux 也可以直接运行 `./run.sh`，它会使用 `.venv`，无需激活。
 
 在界面左侧填写 API Key、服务商（OpenAI / Gemini）、模型名称，以及可选的 Base URL。也可以把 `config_example.json` 复制为 `config.json` 后在其中填写，详见 [README_CONFIG_CN.md](README_CONFIG_CN.md)。
 
