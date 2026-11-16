@@ -217,6 +217,36 @@ class ResourceSelection(unittest.TestCase):
             self.app.processing = False
         self.assertEqual(self.selected(), [str(following / '评分标准.txt'), str(last / '答题卡'), str(last / '名单.csv')])
 
+    def test_switching_exam_folders_clears_cached_layout_and_answer_key(self):
+        first = exam_directory(self.root, '周测')
+        self.pick('select_folder', first / '答题卡')
+        self.app.layout_description = 'Layout A'
+        self.app.template_confirmed = True
+        self.app.answer_key = {'1': 'A'}
+
+        # Re-selecting the same folder keeps the current exam's cached state.
+        self.app.set_exam_folder(str(first / '答题卡') + '/')
+        self.assertEqual(self.app.layout_description, 'Layout A')
+        self.assertTrue(self.app.template_confirmed)
+        self.assertEqual(self.app.answer_key, {'1': 'A'})
+
+        # Auto-switching to another exam clears cached state so B detects or loads its own layout.
+        second = exam_directory(self.root, '期中考')
+        self.pick('load_rubric', second / '评分标准.txt')
+        self.assertEqual(self.app.exam_folder, str(second / '答题卡'))
+        self.assertIsNone(self.app.layout_description)
+        self.assertFalse(self.app.template_confirmed)
+        self.assertEqual(self.app.answer_key, {})
+
+        with patch.object(self.app, 'start_detection_thread') as detect:
+            self.app.ensure_layout_and_run(lambda: None)
+        detect.assert_called_once()
+
+        self.app.clear_folder()
+        self.assertIsNone(self.app.layout_description)
+        self.assertFalse(self.app.template_confirmed)
+        self.assertEqual(self.app.answer_key, {})
+
 
 if __name__ == '__main__':
     unittest.main()

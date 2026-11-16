@@ -1027,6 +1027,12 @@ class App(ctk.CTk):
 
     def set_exam_folder(self, path):
         """Select the answer sheet folder; None clears it."""
+        previous = os.path.realpath(self.exam_folder) if self.exam_folder else None
+        current = os.path.realpath(path) if path else None
+        if current != previous:  # Layout and answer key belong to one exam
+            self.layout_description = None
+            self.template_confirmed = False
+            self.answer_key = {}
         self.exam_folder = path or None
         self.lbl_folder_status.configure(**self._status(path and os.path.basename(os.path.normpath(path)), "status_not_selected"))
         self._refresh_open_buttons()
