@@ -183,6 +183,16 @@ class ResourceSelection(unittest.TestCase):
         self.assertEqual(len(self.app.student_manager.students), 2)
         self.assertIn('成绩.csv', self.log())
 
+    def test_an_empty_student_list_does_not_replace_the_list(self):
+        last = exam_directory(self.root, '周测')
+        self.pick('select_folder', last / '答题卡')
+        following = exam_directory(self.root, '期中考', roster='空名单.csv')
+        (following / '空名单.csv').write_text('姓名,班级\n', encoding='utf-8')  # Valid header, zero student rows
+        self.pick('select_folder', following / '答题卡')
+        self.assertEqual(self.app.student_manager.student_path, str(last / '名单.csv'))
+        self.assertEqual(len(self.app.student_manager.students), 2)
+        self.assertIn('空名单.csv', self.log())
+
     def test_nothing_is_guessed_where_it_is_unclear(self):
         directory = exam_directory(self.root)
         (directory / '试卷.pdf').write_text('the exam paper')  # Two candidates for the rubric

@@ -1091,7 +1091,8 @@ class App(ctk.CTk):
             path = found[kind][0]
             if kind == 'student_list':
                 try:
-                    StudentManager().load_from_file(path)  # Only a readable list replaces the one selected
+                    if StudentManager().load_from_file(path) <= 0:  # Only a non-empty readable list replaces the one selected
+                        raise ValueError("no student rows found")
                 except Exception as e:
                     self.log(self.t("log_auto_list_unreadable", name=os.path.basename(path), error=e))
                     continue
