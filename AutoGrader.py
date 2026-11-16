@@ -1115,9 +1115,10 @@ class App(ctk.CTk):
         csv_data = set() # Stores (Room, Seat) tuples
         csv_filenames = set() # Stores Original Filenames
         
-        # Check grading_data first, then root
+        # Check grading_data first, then root; prefer the current language's summary that regeneration writes.
         grading_data_dir = self.get_folder_path('grading_data')
-        csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
+        csv_names = (["Grade_Summary.csv", "成绩汇总表.csv"] if getattr(self, "current_lang", "CN") == "EN"
+                     else ["成绩汇总表.csv", "Grade_Summary.csv"])
         csv_path = None
         
         # Try grading_data first

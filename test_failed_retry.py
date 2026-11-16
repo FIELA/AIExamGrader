@@ -170,6 +170,35 @@ class TestFailedRetry(unittest.TestCase):
         self.assertEqual(len(self.csv_rows(app)), 1)
         self.assertIn(app.t('msg_finished'), logs)
 
+    def test_english_verification_prefers_english_summary_over_stale_chinese_summary(self):
+        app = self.app('EN', 'EN')
+        self.scan(app, 'done.jpg', 'success')
+        report = self.report(app, 'done.jpg')
+        saved = report.read_bytes()
+        data_dir = Path(app.get_folder_path('grading_data'))
+        (data_dir / '成绩汇总表.csv').write_text('考场,座号,原始文件\n', encoding='utf-8-sig')
+        self.assertEqual(app._verify_files_sync(), ([], [], [], []))
+        grader, logs = self.run_batch(app, [])
+        grader.grade_exam.assert_not_called()
+        self.assertEqual(report.read_bytes(), saved)
+        self.assertIn(app.t('msg_finished'), logs)
+
+    def test_english_verification_rebuilds_english_summary_when_only_stale_chinese_exists(self):
+        app = self.app('CN', 'EN')
+        self.scan(app, 'done.jpg', 'success')
+        report = self.report(app, 'done.jpg')
+        saved = report.read_bytes()
+        data_dir = Path(app.get_folder_path('grading_data'))
+        (data_dir / 'Grade_Summary.csv').unlink()
+        (data_dir / '成绩汇总表.csv').write_text('考场,座号,原始文件\n', encoding='utf-8-sig')
+        self.assertEqual(app._verify_files_sync(), ([], [], ['done.jpg'], []))
+        grader, logs = self.run_batch(app, [])
+        grader.grade_exam.assert_not_called()
+        self.assertEqual(report.read_bytes(), saved)
+        self.assertTrue((Path(app.get_folder_path('success')) / 'done.jpg').is_file())
+        self.assertEqual(len(self.csv_rows(app)), 1)
+        self.assertIn(app.t('msg_finished'), logs)
+
     def test_completion_prompt_checks_archives_when_the_root_is_empty(self):
         app = self.app()
         self.scan(app, 'pending.jpg')
