@@ -32,6 +32,7 @@ import gc
 
 # Import new modules
 from config_manager import ConfigManager
+from exam_resources import EXAM_SUBFOLDERS, find_exam_resources, located_in
 from student_manager import UNSIGNED, StudentManager, name_key, same_class, student_key
 from report_files import candidate_prefixes, find_report, record_image_name, unique_filename, unique_report_prefix
 from sheet_naming import find_graded_sheets, identity_confirmed, original_name, sheet_label, sheet_name
@@ -355,19 +356,8 @@ class App(ctk.CTk):
         exam_folder = exam_folder or self.exam_folder
         if not exam_folder: return None
 
-        # Define possible names (EN, CN)
-        # We could load from translations, but hardcoding here ensures we know what to look for
-        # regardless of current loaded language file state.
-        names_map = {
-            'grading_data': ['grading_data', '阅卷数据'],
-            'original_files': ['original_files', '原始文件'],
-            'reports': ['reports', '阅卷报告'],
-            'success': ['success', '成功归档'],
-            'failed': ['failed', '失败归档'],
-            'removed': ['removed', '已移除']  # Sheets taken out of the grades in review, e.g. scanned twice
-        }
-        
-        possible_names = names_map.get(key, [key])
+        # Possible names (EN, CN): fixed rather than translated, so the folders are found whatever the language
+        possible_names = EXAM_SUBFOLDERS.get(key, [key])
         
         # 1. Check if any exist
         for name in possible_names:
@@ -536,6 +526,7 @@ class App(ctk.CTk):
         
         self.lbl_list_status = ctk.CTkLabel(self.files_card, text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"), font=ctk.CTkFont(size=13))
         self.lbl_list_status.grid(row=3, column=3, padx=12, pady=(6, 16), sticky="w")
+        self._refresh_open_buttons()
 
         # 2. Dashboard / Controls
         self.dashboard_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -760,47 +751,15 @@ class App(ctk.CTk):
         if "model" in profile_data:
             self.combo_model.set(profile_data["model"])
         
-        # Set file paths
-        # Rubric
-        if "rubric_path" in profile_data and profile_data["rubric_path"]:
-            self.rubric_path = profile_data["rubric_path"]
-            if os.path.exists(self.rubric_path):
-                self.lbl_rubric_status.configure(text=os.path.basename(self.rubric_path), text_color=("green", "lightgreen"))
-            else:
-                self.lbl_rubric_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
-        else:
-            # Explicitly clear if not in profile or empty
-            self.rubric_path = None
-            self.lbl_rubric_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
-        
-        # Exam Folder
-        if "exam_folder" in profile_data and profile_data["exam_folder"]:
-            self.exam_folder = profile_data["exam_folder"]
-            if os.path.exists(self.exam_folder):
-                self.lbl_folder_status.configure(text=os.path.basename(self.exam_folder), text_color=("green", "lightgreen"))
-                self.score_marks.scan_async()  # Scores left unwritten when the app last closed
-            else:
-                self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
-        else:
-            # Explicitly clear
-            self.exam_folder = None
-            self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
-        
-        # Student List
-        if "student_list" in profile_data and profile_data["student_list"]:
-            student_path = profile_data["student_list"]
-            if os.path.exists(student_path):
-                count = self.student_manager.load_from_file(student_path)
-                if count > 0:
-                    self.lbl_list_status.configure(text=self.t("status_students", count=count), text_color=("green", "lightgreen"))
-            else:
-                self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
-        else:
-            # Explicitly clear
-            if hasattr(self, "student_manager"):
-                self.student_manager.student_path = None
-                self.student_manager.students = []
-            self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
+        # Set file paths. One moved or deleted since the profile was saved is not selected: its open button would open nothing
+        for key, item, exists, select in (("rubric_path", "res_rubric", os.path.isfile, self.set_rubric),
+                                          ("exam_folder", "res_folder", os.path.isdir, self.set_exam_folder),
+                                          ("student_list", "res_list", os.path.isfile, self.set_student_list)):
+            path = profile_data.get(key)
+            if path and not exists(path):
+                self.log(self.t("log_profile_path_missing", item=self.t(item), path=path))
+                path = None
+            select(path)
 
 
     def t(self, key, **kwargs):
@@ -969,15 +928,12 @@ class App(ctk.CTk):
             self.check_completion_status()
 
     def load_rubric(self):
-        default_dir = os.path.expanduser("~/Downloads")
-        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[
+        path = filedialog.askopenfilename(initialdir=self._dialog_dir("~/Downloads"), filetypes=[
             ("Rubric (TXT / Markdown / PDF)", "*.txt *.md *.pdf"),
             ("Text Files", "*.txt"), ("Markdown", "*.md"), ("PDF", "*.pdf")])
         if path:
-            self.rubric_path = path
-            self.lbl_rubric_status.configure(text=os.path.basename(path), text_color="#106A38")
-            
-            self.check_ready_and_verify()
+            self.set_rubric(path)
+            self._picked_from(os.path.dirname(path))
 
     def _load_rubric_document(self, allow_conversion=True):
         path = self.rubric_path
@@ -1052,45 +1008,115 @@ class App(ctk.CTk):
         default_dir = os.path.expanduser("~/Downloads/photo")
         if not os.path.exists(default_dir):
             default_dir = os.path.expanduser("~/Downloads")
-        path = filedialog.askdirectory(initialdir=default_dir)
+        path = filedialog.askdirectory(initialdir=self._dialog_dir(default_dir))
         if path:
-            self.exam_folder = path
-            self.lbl_folder_status.configure(text=os.path.basename(path), text_color="#106A38")
-            self.score_marks.scan_async()  # Scores left unwritten when this exam was last open
-            self.check_ready_and_verify()
+            self.set_exam_folder(path)
+            self._picked_from(os.path.dirname(os.path.normpath(path)))
 
     def load_student_list(self):
-        default_dir = os.path.expanduser("~/Downloads")
-        path = filedialog.askopenfilename(initialdir=default_dir, filetypes=[("Excel/CSV", "*.xlsx *.csv")])
+        path = filedialog.askopenfilename(initialdir=self._dialog_dir("~/Downloads"), filetypes=[("Excel/CSV", "*.xlsx *.csv")])
+        if path:
+            self.set_student_list(path)
+            self._picked_from(os.path.dirname(path))
+
+    def set_rubric(self, path):
+        """Select the rubric; None clears it."""
+        self.rubric_path = path or None
+        self.lbl_rubric_status.configure(**self._status(path and os.path.basename(path), "status_not_selected"))
+        self._refresh_open_buttons()
+
+    def set_exam_folder(self, path):
+        """Select the answer sheet folder; None clears it."""
+        self.exam_folder = path or None
+        self.lbl_folder_status.configure(**self._status(path and os.path.basename(os.path.normpath(path)), "status_not_selected"))
+        self._refresh_open_buttons()
+        if path:
+            self.score_marks.scan_async()  # Scores left unwritten when this exam was last open
+
+    def set_student_list(self, path):
+        """Load the student list; None clears it."""
+        self.student_manager.students = []
+        self.student_manager.student_path = None
+        status = self._status(None, "status_not_uploaded")
         if path:
             try:
                 count = self.student_manager.load_from_file(path)
-                self.lbl_list_status.configure(text=self.t("status_students", count=count), text_color="#106A38")
-                self.log(self.t("msg_list_loaded", count=count))
-                self.check_ready_and_verify()
             except Exception as e:
                 self.log(self.t("msg_list_failed", error=e))
-                self.lbl_list_status.configure(text=self.t("status_failed"), text_color="#DC2626")
+                status = {"text": self.t("status_failed"), "text_color": "#DC2626"}
+            else:
+                self.log(self.t("msg_list_loaded", count=count))
+                status = self._status(self.t("status_students", count=count), "status_not_uploaded")
+        self.lbl_list_status.configure(**status)
+        self._refresh_open_buttons()
+
+    def _status(self, text, empty_key):
+        """Status label of a resource: what is selected, in green, or that nothing is."""
+        if text:
+            return {"text": text, "text_color": ("#106A38", "lightgreen")}
+        return {"text": self.t(empty_key), "text_color": ("gray40", "gray60")}
+
+    def _refresh_open_buttons(self):
+        """An open button is greyed out while there is nothing to open, rather than doing nothing when clicked."""
+        for button, path in ((self.btn_rubric_open, self.rubric_path), (self.btn_folder_open, self.exam_folder),
+                             (self.btn_list_open, self.student_manager.student_path)):
+            there = bool(path) and os.path.exists(path)
+            button.configure(state="normal" if there else "disabled", fg_color=Theme.INFO if there else ("gray75", "gray30"))
+
+    def _dialog_dir(self, default):
+        """Dialogs open where a resource was last picked: an exam's resources usually sit together."""
+        last = self.config_manager.get("resource_dir", "")
+        return last if last and os.path.isdir(last) else os.path.expanduser(default)
+
+    def _picked_from(self, directory):
+        """After a resource was picked in directory: the dialogs open there, the others come from there, the exam is checked."""
+        self.config_manager.set("resource_dir", directory)
+        if not (self.processing or self._preparing_rubric):  # Work under way keeps the exam it started with
+            self._take_exam_resources(directory)
+        self.check_ready_and_verify()
+
+    def _take_exam_resources(self, directory):
+        """
+        In an exam's directory, one with a single answer sheet folder, select the other resources too:
+        each one not selected yet, or selected elsewhere (e.g. the last exam's), becomes the only one of its kind there.
+        """
+        found = find_exam_resources(directory)
+        if len(found['exam_folder']) != 1:
+            return  # No exam here, or several: which one the files belong to is unclear
+        for selected, kind, item, select in ((self.exam_folder, 'exam_folder', 'res_folder', self.set_exam_folder),
+                                             (self.rubric_path, 'rubric', 'res_rubric', self.set_rubric),
+                                             (self.student_manager.student_path, 'student_list', 'res_list', self.set_student_list)):
+            if located_in(selected, directory) or len(found[kind]) != 1:
+                continue
+            path = found[kind][0]
+            if kind == 'student_list':
+                try:
+                    StudentManager().load_from_file(path)  # Only a readable list replaces the one selected
+                except Exception as e:
+                    self.log(self.t("log_auto_list_unreadable", name=os.path.basename(path), error=e))
+                    continue
+            self.log(self.t("log_auto_selected", item=self.t(item), name=os.path.basename(path)))
+            select(path)
 
     def _verify_files_sync(self):
         """Synchronous version of verification logic. Returns (missing_reports, missing_jsons, missing_csv, failed_files)"""
         if not self.exam_folder: return [], [], [], []
         
-        # 1. Get Images
+        # 1. Check active scans and success archives; an empty root must not skip failed archives.
         valid_extensions = ('.png', '.jpg', '.jpeg')
+        success_dir = self.get_folder_path('success')
         try:
-            images = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
-            total_images = len(images)
+            image_dirs = [d for d in (self.exam_folder, success_dir) if os.path.isdir(d)]
+            images = sorted({f for d in image_dirs for f in os.listdir(d)
+                             if f.lower().endswith(valid_extensions) and os.path.isfile(os.path.join(d, f))})
         except Exception: return [], [], [], []
-
-        if total_images == 0: return [], [], [], []
 
         # 2. Load CSV Data for quick lookup
         csv_data = set() # Stores (Room, Seat) tuples
         csv_filenames = set() # Stores Original Filenames
         
         # Check grading_data first, then root
-        grading_data_dir = os.path.join(self.exam_folder, "grading_data")
+        grading_data_dir = self.get_folder_path('grading_data')
         csv_names = ["成绩汇总表.csv", "Grade_Summary.csv"]
         csv_path = None
         
@@ -1137,9 +1163,9 @@ class App(ctk.CTk):
         missing_jsons = []
         failed_files = []
         
-        reports_dir = os.path.join(self.exam_folder, "reports")
-        failed_dir = os.path.join(self.exam_folder, "failed")
-        success_dir = os.path.join(self.exam_folder, "success") # New success folder
+        reports_dir = self.get_folder_path('reports')
+        failed_dir = self.get_folder_path('failed')
+        reverse_lookup_map = None  # Rebuilt for this exam and this check, including newly saved reports.
         
         checked_count = 0
         for filename in images:
@@ -1209,8 +1235,8 @@ class App(ctk.CTk):
             # If standard checks failed, try to find by original filename in JSONs
             if (not report_found or not json_found) and os.path.exists(reports_dir):
                 # Lazy load the reverse map only if needed
-                if not hasattr(self, '_reverse_lookup_map'):
-                    self._reverse_lookup_map = {}
+                if reverse_lookup_map is None:
+                    reverse_lookup_map = {}
                     try:
                         for f in os.listdir(reports_dir):
                             if f.endswith(".json"):
@@ -1218,16 +1244,15 @@ class App(ctk.CTk):
                                 try:
                                     with open(j_path, 'r', encoding='utf-8') as jf:
                                         data = json.load(jf)
-                                        orig_name = data.get('original_filename', '')
-                                        if orig_name:
-                                            base_f = os.path.splitext(f)[0]
-                                            self._reverse_lookup_map[orig_name] = base_f
+                                        for image_name in (data.get('original_filename'), data.get('renamed_filename')):
+                                            if image_name:
+                                                reverse_lookup_map[image_name] = os.path.splitext(f)[0]
                                 except: pass
                     except: pass
                 
                 # Check map
-                if filename in self._reverse_lookup_map:
-                    found_base = self._reverse_lookup_map[filename]
+                if filename in reverse_lookup_map:
+                    found_base = reverse_lookup_map[filename]
                     
                     if not report_found:
                         if os.path.exists(os.path.join(reports_dir, f"{found_base}.md")):
@@ -1261,14 +1286,6 @@ class App(ctk.CTk):
                     failed_files.extend([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
                 except: pass
             
-        # Check Success Folder (files here are considered processed/verified if they have reports)
-
-        if os.path.exists(success_dir):
-             try:
-                success_files = [f for f in os.listdir(success_dir) if f.lower().endswith(valid_extensions)]
-                pass
-             except: pass
-            
         return missing_reports, missing_jsons, missing_csv, failed_files
 
     def check_completion_status(self):
@@ -1280,7 +1297,10 @@ class App(ctk.CTk):
         # 1. Get Images count for log
         valid_extensions = ('.png', '.jpg', '.jpeg')
         try:
-            images = [f for f in os.listdir(self.exam_folder) if f.lower().endswith(valid_extensions)]
+            image_dirs = [d for d in (self.exam_folder, self.get_folder_path('success'), self.get_folder_path('failed'))
+                          if os.path.isdir(d)]
+            images = [f for d in image_dirs for f in os.listdir(d)
+                      if f.lower().endswith(valid_extensions) and os.path.isfile(os.path.join(d, f))]
             total_images = len(images)
         except Exception: return
 
@@ -1773,6 +1793,9 @@ class App(ctk.CTk):
     # --- Resource Controls ---
     def open_path(self, path):
         if not path or not os.path.exists(path):
+            if path:  # Moved or deleted since it was selected
+                self.log(self.t("log_open_missing", path=path))
+            self._refresh_open_buttons()
             return
         
         try:
@@ -1789,28 +1812,21 @@ class App(ctk.CTk):
         self.open_path(self.rubric_path)
 
     def clear_rubric(self):
-        self.rubric_path = None
-        self.lbl_rubric_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
+        self.set_rubric(None)
         self.save_current_config()
 
     def open_folder(self):
         self.open_path(self.exam_folder)
 
     def clear_folder(self):
-        self.exam_folder = None
-        self.lbl_folder_status.configure(text=self.t("status_not_selected"), text_color=("gray40", "gray60"))
+        self.set_exam_folder(None)
         self.save_current_config()
 
     def open_list(self):
-        self.open_path(self.student_list_path)
+        self.open_path(self.student_manager.student_path)
 
     def clear_list(self):
-        self.student_list_path = None
-        if hasattr(self, "student_manager"):
-            self.student_manager.student_path = None
-            self.student_manager.students = [] # Clear loaded students too
-            
-        self.lbl_list_status.configure(text=self.t("status_not_uploaded"), text_color=("gray40", "gray60"))
+        self.set_student_list(None)
         self.save_current_config()
 
     def parse_student_list_thread(self):
@@ -3446,8 +3462,11 @@ class App(ctk.CTk):
         by hand) and each sheet without a report. Returns how many were found; counts that disagree otherwise count once.
         """
         self.ui_after(0, lambda: self.log(self.t("log_verify_counts")))
-        image_dirs = [d for d in (self.exam_folder, self.get_folder_path('success')) if d and os.path.isdir(d)]
-        images = [os.path.join(d, f) for d in image_dirs for f in os.listdir(d) if f.lower().endswith(valid_extensions)]
+        failed_dir = self.get_folder_path('failed')
+        image_dirs = [d for d in (self.exam_folder, self.get_folder_path('success'), failed_dir) if d and os.path.isdir(d)]
+        images = [os.path.join(d, f) for d in image_dirs for f in os.listdir(d)
+                  if f.lower().endswith(valid_extensions) and os.path.isfile(os.path.join(d, f))]
+        failed_images = {os.path.abspath(p) for p in images if os.path.dirname(p) == failed_dir}
 
         reports_dir = self.get_folder_path('reports')
         if os.path.exists(reports_dir):
@@ -3469,16 +3488,18 @@ class App(ctk.CTk):
         self.ui_after(0, lambda ti=len(images), jc=json_count, mc=md_count, cr=csv_rows:
             self.log(self.t("log_grading_stats", ti=ti, jc=jc, mc=mc, cr=cr)))
 
-        # A report's sheet may also wait in the failed folder for another try
-        sheets = find_graded_sheets(reports_dir, image_dirs + [self.get_folder_path('failed')])
+        sheets = find_graded_sheets(reports_dir, image_dirs)
         found = {os.path.abspath(path) for _, _, path in sheets if path}
         missing = [(os.path.basename(j), record_image_name(data) or os.path.splitext(os.path.basename(j))[0]) for j, data, path in sheets if not path]
-        unreported = [os.path.basename(p) for p in images if os.path.abspath(p) not in found]
+        unreported = {os.path.abspath(p) for p in images if os.path.abspath(p) not in found}
         for report, image in missing:
             self.ui_after(0, lambda r=report, i=image: self.log(self.t("log_report_image_missing", report=r, image=i)))
-        for image in unreported:
-            self.ui_after(0, lambda i=image: self.log(self.t("log_image_without_report", image=i)))
-        problems = len(missing) + len(unreported)
+        for image in sorted(unreported - failed_images):
+            self.ui_after(0, lambda i=os.path.basename(image): self.log(self.t("log_image_without_report", image=i)))
+        # A previous report does not make a scan left in the failed archive complete.
+        for image in sorted(failed_images):
+            self.ui_after(0, lambda i=os.path.basename(image): self.log(self.t("log_failed_image_remaining", image=i)))
+        problems = len(missing) + len(unreported | failed_images)
         if not problems and not len(images) == json_count == md_count == csv_rows:
             problems = 1
         return problems
@@ -3689,6 +3710,12 @@ class App(ctk.CTk):
                 
                 # Run full verification
                 missing_reports, missing_jsons, missing_csv, failed_files = self._verify_files_sync()
+
+                # Summary rows are derived from reports; restore them before deciding a scan needs the model again.
+                if set(missing_csv) - set(missing_reports) - set(missing_jsons):
+                    self.log(self.t("log_regen_csv"))
+                    self.regenerate_csv_from_jsons()
+                    missing_reports, missing_jsons, missing_csv, failed_files = self._verify_files_sync()
                 
                 # Build set of all files that are missing something
                 files_needing_work = set()
@@ -3740,8 +3767,8 @@ class App(ctk.CTk):
             if os.path.exists(failed_dir):
                 failed_count = len([f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)])
             
-            # Set total to PENDING files only
-            self.total_files = len(pending_files)
+            # Normal runs also retry the failed archive, even when the root has no pending scans.
+            self.total_files = len(pending_files) + (failed_count if not target_files else 0)
             self.completed_count = 0
             self.ui_after(0, lambda: self.update_progress_ui())
             
@@ -3778,7 +3805,7 @@ class App(ctk.CTk):
             
             # ===== PHASE 2: Retry Failed Files =====
             if not target_files and not self.stop_event.is_set():
-                failed_dir = os.path.join(self.exam_folder, "failed")
+                failed_dir = self.get_folder_path('failed')
                 if os.path.exists(failed_dir):
                     failed_files = [f for f in os.listdir(failed_dir) if f.lower().endswith(valid_extensions)]
                     if failed_files:
