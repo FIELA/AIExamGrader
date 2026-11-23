@@ -326,6 +326,24 @@ class TestScans(ServiceTest):
         self.assertTrue(archive.exists())
         self.assertFalse((self.exam.root / 'IMG_1.jpg').exists())
 
+    def test_an_old_marker_finds_a_renamed_scan_by_its_checksum(self):
+        json_path, data = self.exam.sheet('IMG_1.jpg', archived_as='archive.jpg')
+        self.exam.template()
+        data.update(db_student_info={'class': '701', 'name': '张三'}, review_count=1)
+        self.service.commit_report(json_path, data)
+        self.assertTrue(self.service.drain())
+        archive = self.exam.success / 'archive.jpg'
+        marker = sm.read_marker(archive)
+        self.assertEqual(marker['orig'], 'IMG_1.jpg')
+
+        self.service.commit_review(json_path, data)
+        self.assertTrue(self.service.drain())
+        self.assertEqual(sm.read_marker(archive), marker)
+        os.remove(json_path)
+        scan(self.exam.originals / 'IMG_1.jpg', size=(800, 800))  # The old name now refers to different bytes
+        self.assertEqual(self.service.recover_for_regrading(str(archive)), ('copied', '701-张三.jpg'))
+        self.assertEqual(sm.file_sha256(self.exam.root / '701-张三.jpg'), marker['orig_sha256'])
+
     def test_before_any_marks_sheets_go_back_as_before(self):
         self.exam.sheet('IMG_1.jpg')
         self.assertEqual(self.service.recover_for_regrading(str(self.exam.success / 'IMG_1.jpg')), ('move', 'IMG_1.jpg'))

@@ -34,8 +34,8 @@ import gc
 from config_manager import ConfigManager
 from exam_resources import EXAM_SUBFOLDERS, find_exam_resources, located_in
 from student_manager import UNSIGNED, StudentManager, name_key, same_class, student_key
-from report_files import candidate_prefixes, find_report, record_image_name, unique_filename, unique_report_prefix
-from sheet_naming import find_graded_sheets, identity_confirmed, original_name, sheet_label, sheet_name
+from report_files import candidate_prefixes, filename_key, find_report, record_image_name, unique_filename, unique_report_prefix
+from sheet_naming import IMAGE_EXTENSIONS, find_graded_sheets, identity_confirmed, original_name, original_storage_name, sheet_label, sheet_name
 from grader_engine import AIGraderEngine
 from rubric_loader import RubricLoader
 from translations import TRANSLATIONS
@@ -1037,6 +1037,16 @@ class App(ctk.CTk):
         self.lbl_folder_status.configure(**self._status(path and os.path.basename(os.path.normpath(path)), "status_not_selected"))
         self._refresh_open_buttons()
         if path:
+            try:
+                outstanding = (path, self.get_folder_path('failed'))
+                if any(os.path.isdir(folder) and any(name.lower().endswith(IMAGE_EXTENSIONS) for name in os.listdir(folder))
+                       for folder in outstanding):
+                    self.score_marks.recover_original_rename()
+                else:
+                    self.score_marks.finish_original_renames()
+            except (OSError, ValueError, KeyError) as error:
+                self.log(self.t('log_original_rename_problem', file=os.path.basename(path), error=error))
+                return
             self.score_marks.scan_async()  # Scores left unwritten when this exam was last open
 
     def set_student_list(self, path):
@@ -2052,7 +2062,7 @@ class App(ctk.CTk):
         candidates = []
         backup_dir = self.get_folder_path('original_files')
         for _, data in self.score_marks.reports():
-            name = os.path.basename(str(data.get('original_filename') or ''))
+            name = original_storage_name(data)
             archive = self.score_marks.archive_path(self.exam_folder, data)
             if name and archive and not os.path.exists(os.path.join(backup_dir, name)) and not score_marks.read_marker(archive):
                 candidates.append((archive, name))
@@ -3382,14 +3392,29 @@ class App(ctk.CTk):
     def _rename_new_arrivals(self, files):
         """Rename exam-folder images that share a name with a different sheet already processed or backed up."""
         processed_dirs = [self.get_folder_path(key) for key in ('success', 'failed', 'original_files')]
+        reserved = {filename_key(name) for _, data in self.score_marks.original_reports()
+                    if original_storage_name(data) != original_name(data)
+                    for name in (original_name(data), original_storage_name(data))}
+        active_scans = {}
+        for _, data in self.score_marks.reports():
+            scan = self.score_marks.original_path(self.exam_folder, data)
+            if not scan:
+                continue
+            for name in (original_name(data), original_storage_name(data), record_image_name(data)):
+                if name:
+                    active_scans.setdefault(filename_key(name), []).append(scan)
         result = []
         for f in files:
             src = os.path.join(self.exam_folder, f)
+            key = filename_key(f)
             same_named = [os.path.join(d, f) for d in processed_dirs if os.path.isfile(os.path.join(d, f))]
-            if same_named and not any(filecmp.cmp(src, p) for p in same_named):
+            owned_scans = active_scans.get(key, ())
+            matches_owned = any(filecmp.cmp(src, p, shallow=False) for p in owned_scans)
+            matches_existing = matches_owned or any(filecmp.cmp(src, p, shallow=False) for p in same_named)
+            if (key in reserved and not matches_owned) or (same_named and not matches_existing):
                 try:
                     with self.rename_lock:
-                        new_name = unique_filename(f, [self.exam_folder] + processed_dirs)
+                        new_name = unique_filename(f, [self.exam_folder] + processed_dirs, reserved=reserved)
                         os.rename(src, os.path.join(self.exam_folder, new_name))
                     self.ui_after(0, lambda o=f, n=new_name: self.log(self.t("log_renamed_name_clash", old=o, new=n)))
                     f = new_name
@@ -3641,7 +3666,10 @@ class App(ctk.CTk):
             return False
 
     def process_images(self, target_files=None):
+        exam = self.exam_folder
+        finished = False
         try:
+            self.score_marks.recover_original_rename(exam)
             rubric_text = self.read_rubric_text()
             
             grader = self._create_grader()
@@ -3669,22 +3697,36 @@ class App(ctk.CTk):
             if not os.path.exists(original_files_dir):
                 os.makedirs(original_files_dir)
                 
+            root_originals = {}
+            for _, data in self.score_marks.reports():
+                storage = original_storage_name(data)
+                if storage:
+                    for name in (original_name(data), record_image_name(data), storage):
+                        if name:
+                            root_originals.setdefault(filename_key(name), storage)
+
             # Backup root files
             for f in files:
                 src = os.path.join(self.exam_folder, f)
-                dst = os.path.join(original_files_dir, f)
-                if not os.path.exists(dst): 
+                dst = os.path.join(original_files_dir, root_originals.get(filename_key(f), f))
+                if not os.path.exists(dst):
                     try: shutil.copy2(src, dst)
                     except: pass
             
-            # Backup success files (if not already backed up). A sheet renamed after grading or review is backed up
-            # under the name it was scanned with, so its scan is not copied a second time under the new name
-            originals = {os.path.basename(path): original_name(data, path)
+            # Back up successful sheets under their recorded original storage names.
+            originals = {os.path.basename(path): original_storage_name(data, path)
                          for _, data, path in find_graded_sheets(self.get_folder_path('reports'), [success_dir]) if path}
+            reserved_originals = set()
+            if any(f not in originals for f in success_files):
+                reserved_originals = {filename_key(original_storage_name(data))
+                                      for _, data in self.score_marks.original_reports()}
             for f in success_files:
                 src = os.path.join(success_dir, f)
                 dst = os.path.join(original_files_dir, originals.get(f, f))
                 if not os.path.exists(dst):
+                    if f not in originals and filename_key(f) in reserved_originals:
+                        self.ui_after(0, lambda fn=f: self.log(self.t('log_original_backup_conflict', file=fn)))
+                        continue
                     if not self.score_marks.may_back_up(src):  # It may carry scores: never a scan
                         self.ui_after(0, lambda fn=f: self.log(self.t("log_marks_backup_skipped", image=fn)))
                         continue
@@ -3755,6 +3797,8 @@ class App(ctk.CTk):
                         if mode is None:
                             self.log(self.t("log_marks_recover_manual", image=f))
                             continue
+                        if f not in originals and filename_key(f) in reserved_originals:
+                            continue  # Moving this archive by name would give another sheet's scan to a new report
                         dst = os.path.join(self.exam_folder, f)
                         try:
                             shutil.move(src, dst)
@@ -3857,6 +3901,7 @@ class App(ctk.CTk):
             if self.stop_event.is_set():
                 self.ui_after(0, lambda: self.log(self.t("msg_stopped")))
             else:
+                finished = True
                 if problems:
                     self.ui_after(0, lambda n=problems: self.log(self.t("msg_finished_problems", count=n)))
                 else:
@@ -3870,14 +3915,18 @@ class App(ctk.CTk):
             self.ui_after(0, lambda e=error_msg: self.log(self.t("msg_error", error=e)))
         finally:
             self.processing = False
+            if finished:
+                try:
+                    self.score_marks.finish_original_renames(exam)
+                except (OSError, ValueError, KeyError) as error:
+                    self.ui_after(0, self.log, self.t('log_original_rename_problem', file=os.path.basename(exam), error=error))
             self.ui_after(0, lambda: self.reset_ui_state())
 
     def rename_reviewed_sheets(self):
         """
         When review is done: rename every graded sheet whose student is confirmed to Class-Name (e.g. 701-张三.jpg),
         in the folder it is in, and record the new name in its report. Repeated names get _1, _2 ...; sheets whose
-        student is still to be checked keep their names. Each scan stays in the original files folder under the name
-        it was scanned with; one missing there is backed up before its sheet is renamed.
+        student is still to be checked keep their names. A missing scan is backed up when a clean source exists.
         Returns (renamed, kept): sheets renamed now, and sheets not named after a student.
         """
         backup_dir = self.get_folder_path('original_files')
@@ -3887,45 +3936,43 @@ class App(ctk.CTk):
                 continue
             base = sheet_name(data.get('db_student_info') or {}) if identity_confirmed(data) else ''
             if base:
-                sheets.append({'json': json_path, 'data': data, 'path': path, 'start': path, 'name': base + os.path.splitext(path)[1]})
+                sheets.append({'json': json_path, 'path': path, 'start': path, 'name': base + os.path.splitext(path)[1]})
             else:
                 kept += 1
 
         def rename(sheet, name):
-            path, data = sheet['path'], sheet['data']
+            path = sheet['path']
             if name == os.path.basename(path):
                 return
-            original = original_name(data, path)
             new_path = os.path.join(os.path.dirname(path), name)
             try:
-                backup = os.path.join(backup_dir, original)
+                with open(sheet['json'], encoding='utf-8') as f:
+                    data = json.load(f)
+                original = original_name(data, path)
+                storage_name = original_storage_name(data, path)
+                backup = os.path.join(backup_dir, storage_name)
                 if not os.path.exists(backup):  # Never rename a sheet whose scan is not backed up
                     if self.score_marks.may_back_up(path):
                         os.makedirs(backup_dir, exist_ok=True)
                         shutil.copy2(path, backup)
-                        self.log(self.t("log_original_backed_up", filename=original))
+                        self.log(self.t("log_original_backed_up", filename=storage_name))
                     else:  # The graded image may carry scores, so it cannot stand in for the scan
                         self.log(self.t("log_marks_backup_skipped", image=os.path.basename(path)))
                 os.rename(path, new_path)
                 record = dict(data, original_filename=original, renamed_filename=name)
                 if name == original:
                     del record['renamed_filename']
-                temp = sheet['json'] + '.tmp'  # A failed write must not leave the report cut short
                 try:
-                    with open(temp, 'w', encoding='utf-8') as f:
-                        json.dump(record, f, ensure_ascii=False, indent=2)
-                    os.replace(temp, sheet['json'])
+                    self.score_marks.commit_report(sheet['json'], record, enqueue=False)
                 except Exception:
-                    if os.path.exists(temp):
-                        os.remove(temp)
                     os.rename(new_path, path)  # The report must keep pointing at the image
                     raise
             except Exception as e:
                 self.log(self.t("log_rename_failed", filename=os.path.basename(path), new=name, error=e))
                 return
-            sheet['path'], sheet['data'] = new_path, record
+            sheet['path'] = new_path
 
-        with self.rename_lock:
+        with self.rename_lock, self.score_marks.commit_lock:
             folders = self._image_folders()
             # Same name except for letter case counts as named: the file system may see the two as one
             pending = [s for s in sheets if os.path.basename(s['path']).lower() != s['name'].lower()]
@@ -3990,6 +4037,12 @@ class App(ctk.CTk):
     def open_review_window(self):
         if not self.exam_folder:
             messagebox.showerror(self.t("title_error"), self.t("msg_select_files"))
+            return
+        try:
+            self.score_marks.recover_original_rename()
+        except (OSError, ValueError, KeyError) as error:
+            messagebox.showerror(self.t('title_error'), self.t('log_original_rename_problem',
+                                 file=os.path.basename(self.exam_folder), error=error), parent=self)
             return
             
         # Ensure JSONs exist (Legacy Support)

@@ -36,8 +36,13 @@ def sheet_name(student, pattern=SHEET_NAME):
 
 
 def original_name(data, image_name=''):
-    """Name the sheet was scanned, and backed up to the original files folder, with."""
+    """Name recorded at scanning, also used to keep the paper order after renaming."""
     return os.path.basename(str(data.get('original_filename') or '')) or os.path.basename(image_name)
+
+
+def original_storage_name(data, image_name=''):
+    """Name of the scan in Original Files. Older reports use the scan's first name."""
+    return os.path.basename(str(data.get('original_storage_filename') or '')) or original_name(data, image_name)
 
 
 def find_graded_sheets(reports_dir, image_dirs):

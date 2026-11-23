@@ -8,6 +8,7 @@
 
 import json
 import os
+import unicodedata
 
 
 def record_image_name(data):
@@ -84,17 +85,24 @@ def unique_report_prefix(reports_dir, prefix, image_name):
     return candidate
 
 
-def unique_filename(filename, folders, current_path=None):
+def filename_key(filename):
+    """Account for case-insensitive filesystems and Unicode equivalents in reserved names."""
+    return unicodedata.normalize('NFC', filename).casefold()
+
+
+def unique_filename(filename, folders, current_path=None, reserved=()):
     """Return filename, or filename with _1, _2 ... added, so that no other file in folders has that name."""
     stem, ext = os.path.splitext(filename)
     current = os.path.abspath(current_path) if current_path else None
 
     def taken(candidate):
+        if filename_key(candidate) in reserved:
+            return True
         for folder in folders:
             if not folder:
                 continue
             path = os.path.join(folder, candidate)
-            if os.path.exists(path) and os.path.abspath(path) != current:
+            if os.path.lexists(path) and os.path.abspath(path) != current:
                 return True
         return False
 
