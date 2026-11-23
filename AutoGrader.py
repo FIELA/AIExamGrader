@@ -3395,11 +3395,23 @@ class App(ctk.CTk):
         reserved = {filename_key(name) for _, data in self.score_marks.original_reports()
                     if original_storage_name(data) != original_name(data)
                     for name in (original_name(data), original_storage_name(data))}
+        active_scans = {}
+        for _, data in self.score_marks.reports():
+            scan = self.score_marks.original_path(self.exam_folder, data)
+            if not scan:
+                continue
+            for name in (original_name(data), original_storage_name(data), record_image_name(data)):
+                if name:
+                    active_scans.setdefault(filename_key(name), []).append(scan)
         result = []
         for f in files:
             src = os.path.join(self.exam_folder, f)
+            key = filename_key(f)
             same_named = [os.path.join(d, f) for d in processed_dirs if os.path.isfile(os.path.join(d, f))]
-            if filename_key(f) in reserved or (same_named and not any(filecmp.cmp(src, p) for p in same_named)):
+            owned_scans = active_scans.get(key, ())
+            matches_owned = any(filecmp.cmp(src, p, shallow=False) for p in owned_scans)
+            matches_existing = matches_owned or any(filecmp.cmp(src, p, shallow=False) for p in same_named)
+            if (key in reserved and not matches_owned) or (same_named and not matches_existing):
                 try:
                     with self.rename_lock:
                         new_name = unique_filename(f, [self.exam_folder] + processed_dirs, reserved=reserved)
@@ -3685,11 +3697,19 @@ class App(ctk.CTk):
             if not os.path.exists(original_files_dir):
                 os.makedirs(original_files_dir)
                 
+            root_originals = {}
+            for _, data in self.score_marks.reports():
+                storage = original_storage_name(data)
+                if storage:
+                    for name in (original_name(data), record_image_name(data), storage):
+                        if name:
+                            root_originals.setdefault(filename_key(name), storage)
+
             # Backup root files
             for f in files:
                 src = os.path.join(self.exam_folder, f)
-                dst = os.path.join(original_files_dir, f)
-                if not os.path.exists(dst): 
+                dst = os.path.join(original_files_dir, root_originals.get(filename_key(f), f))
+                if not os.path.exists(dst):
                     try: shutil.copy2(src, dst)
                     except: pass
             

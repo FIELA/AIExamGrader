@@ -259,6 +259,26 @@ class TestRename(unittest.TestCase):
         (self.exam / '701-张三.jpg').write_bytes(scan)
         self.assertEqual(app._rename_new_arrivals(['701-张三.jpg']), ['701-张三_1.jpg'])
 
+    def test_root_scan_owned_by_an_active_report_is_not_renamed_as_a_new_arrival(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701')})
+        report = self.reports / 'IMG_0001.json'
+        archive = self.success / 'IMG_0001.jpg'
+        scan = archive.read_bytes()
+        app.score_marks.commit_review(report, dict(self.report(report.name), review_count=1))
+
+        shutil.move(str(archive), str(self.exam / 'IMG_0001.jpg'))
+        self.assertEqual(app._rename_new_arrivals(['IMG_0001.jpg']), ['IMG_0001.jpg'])
+        self.assertTrue((self.exam / 'IMG_0001.jpg').is_file())
+
+        (self.exam / '701-张三.jpg').write_bytes(scan)
+        self.assertEqual(app._rename_new_arrivals(['701-张三.jpg']), ['701-张三.jpg'])
+        self.assertTrue((self.exam / '701-张三.jpg').is_file())
+
+        Image.new('RGB', (8, 8), 'white').save(self.exam / 'IMG_0001.jpg')
+        Image.new('RGB', (8, 8), 'white').save(self.exam / '701-张三.jpg')
+        self.assertEqual(app._rename_new_arrivals(['IMG_0001.jpg']), ['IMG_0001_1.jpg'])
+        self.assertEqual(app._rename_new_arrivals(['701-张三.jpg']), ['701-张三_1.jpg'])
+
 
 class TestBackupAfterRenaming(unittest.TestCase):
     def test_a_renamed_sheet_is_not_backed_up_again(self):
@@ -291,6 +311,36 @@ class TestBackupAfterRenaming(unittest.TestCase):
                     self.assertNotIn('original_rename_pending', saved)
                     app.process_images()  # The next run must use the new storage name for backups.
                 self.assertEqual(sorted(os.listdir(exam / '原始文件')), ['701-张三.jpg', 'IMG_0009.jpg'])
+            finally:
+                app.destroy()
+
+    def test_a_root_scan_belonging_to_a_renamed_original_is_preserved_without_rebackup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exam = root / 'exam'
+            for folder in ('原始文件', '阅卷报告'):
+                (exam / folder).mkdir(parents=True)
+            Image.new('RGB', (8, 8), (10, 20, 30)).save(exam / '原始文件' / '701-张三.jpg')
+            shutil.copy2(exam / '原始文件' / '701-张三.jpg', exam / 'IMG_0001.jpg')
+            report = {'original_filename': 'IMG_0001.jpg', 'original_storage_filename': '701-张三.jpg',
+                      'total_score': 1, 'details': [], 'db_student_info': student('张三', '701'),
+                      'student_match': {'method': 'class_name', 'candidates': []}, 'review_count': 1}
+            (exam / '阅卷报告' / 'IMG_0001.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
+            (exam / '阅卷报告' / 'IMG_0001.md').write_text('# Report\n', encoding='utf-8')
+            (root / 'rubric.txt').write_text('Question 1: answer A, 1 point.')
+            with patch('AutoGrader.ConfigManager', return_value=ConfigManager(str(root / 'config.json'))):
+                app = App()
+            try:
+                app.withdraw()
+                app.exam_folder, app.rubric_path, app.current_api_key = str(exam), str(root / 'rubric.txt'), 'fake-test-key'
+                app.regenerate_csv_from_jsons()
+                with patch('AutoGrader.AIGraderEngine'), patch.object(app, 'process_single_file') as process_single:
+                    app.process_images()
+                process_single.assert_not_called()
+                self.assertTrue((exam / 'IMG_0001.jpg').is_file())
+                self.assertFalse((exam / 'IMG_0001_1.jpg').exists())
+                self.assertEqual(sorted(os.listdir(exam / '原始文件')), ['701-张三.jpg'])
+                self.assertEqual(sorted(p.name for p in (exam / '阅卷报告').glob('*.json')), ['IMG_0001.json'])
             finally:
                 app.destroy()
 
