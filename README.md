@@ -33,7 +33,7 @@ AI Exam Grader grades handwritten answer sheets with a vision model from OpenAI 
   - A name that is one character off is still matched, but flagged for checking.
   - When a sheet is unclear, no student is picked; candidates are listed instead.
 - **Review**: check each sheet's student, objective answers and subjective scores, with or without the scan beside them. Search by name, exam number or Room-Seat. Every change is logged.
-- **Sheets named after students**: when review is finished, each graded sheet is renamed "Class-Name.jpg" (e.g. `701-张三.jpg`). Repeated names get a suffix, and sheets whose student is not yet confirmed, or marked No Name, keep their names. The scans stay in the original files backup.
+- **Sheets named after students**: confirming a sheet renames its scan in `original_files/` to "Class-Name.jpg" (e.g. `701-张三.jpg`). The graded sheets in `success/` are named after students when the whole review is complete. Repeated names get a suffix. Scans marked No Name use their scanned names.
 - **Scores written on the sheets**: after grading and review, every graded sheet in `success/` gets its scores as small red tables, each "question | score" (e.g. `26(1) | 4分`, `MC | 57 pts`, `Total | 65`). The positions are set once per exam; on a shifted scan the tables move a little, but each names its question, so none is misread. The scores are redrawn when review changes them, always from the scan in `original_files/`, which is never changed.
 - **Safe data**: scans are backed up before grading. Each sheet keeps its own report, so rescanned sheets and repeated file names never overwrite each other. Chinese and English interface.
 
@@ -88,7 +88,9 @@ To build an app: run `python build.py` on macOS or `python build_windows.py` on 
    - Sheets that need checking show what was recognized, and the candidate students appear first in the dropdown. A student you choose is recorded as "Chosen in review".
    - If the student is on other sheets too, the student panel names them with their scores and review status: the sheet may have been scanned twice. On the extra one, click "Remove This Sheet": its image and report move to `removed/` and leave the grade summary, while the scan stays in `original_files/`. Do not delete sheets in Finder, which leaves their reports behind and the counts off.
    - Use "Regrade" to grade a single sheet again. After changing the answer key, use "Regrade Obj." in the main window to recalculate all sheets.
-5. **Renaming**: once every sheet is reviewed (passing the last sheet while some are skipped or not reviewed yet tells you how many are left and opens the first of them), the graded sheets are renamed "Class-Name" where they are (in `success/`), and their reports and the grade summary record the new names. A scan missing from `original_files/` is backed up first. If grading is still running, renaming waits until you finish reviewing after it.
+5. **Renaming**
+   - After grading ends, each click on "Confirm & Next" renames that sheet's scan in `original_files/`. Scans reviewed while grading is active are renamed when that run finishes. The report records both the scanned name and the current name. The scan itself stays free of score marks. For an existing exam, this takes effect the next time you confirm a sheet.
+   - Once every sheet has been reviewed, the graded sheets in `success/` are renamed "Class-Name". The reports and grade summary record the archive name. If any sheets are still to be reviewed when you pass the last one, the app tells you how many are left and opens the first one.
 6. **Scores on the sheets**: place the scores once in the Score Marks window and every sheet of the exam is marked at those positions (it opens before the first grading, or from "Score Marks" in the main window).
    - Pick an item on the right (total, multiple-choice total, each sub-question) and click on the sample to place it; drag a red score to move it. "Locate" asks the model once for positions on the current sample; it fills only the items not placed yet, and you check each one.
    - **Look at several samples with Previous/Next**: scans of one exam are often tens to a hundred pixels apart (cropped differently, two pages stitched). Put the tables in blank space outside the answer areas (e.g. in the margin outside the frame) and shifts rarely bring them over answers. The window warns about tables over dark writing, tables that overlap and tables at the image's edge; those are moved inside the image.
@@ -110,7 +112,7 @@ Everything is written inside the answer-sheet folder. The Chinese interface uses
 answer-sheet folder/
 ├─ grading_data/     answer key, sheet layout, score positions (score_marks.json), PDF transcription and Grade_Summary.csv
 ├─ reports/          one .md report and one .json file per sheet
-├─ original_files/   backup of the scans under their scanned names, taken before grading (never marked)
+├─ original_files/   scan backup taken before grading, renamed on confirmation in review and kept free of score marks
 ├─ success/          graded sheets, with their scores in red once score positions are set; renamed Class-Name after review (until then, a sheet not named Room-Seat is renamed to its exam number when one is read)
 ├─ failed/           sheets that failed, retried on the next run
 └─ removed/          sheets taken out of the grades in review (e.g. scanned twice): one dated folder each, image and report kept where they were, so moving them back restores them

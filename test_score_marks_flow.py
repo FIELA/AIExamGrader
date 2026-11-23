@@ -77,9 +77,10 @@ class MarkedExam(unittest.TestCase):
     def assert_marked_as_saved(self, name, archive=None):
         marker = sm.read_marker(self.success / (archive or name))
         self.assertIsNotNone(marker, f"{archive or name} has no scores")
-        self.assertEqual(marker['scores'], sm.sheet_marks(self.saved(name), self.template).digest)
-        self.assertEqual(sm.classify_archive(self.success / (archive or name), self.originals / name,
-                                             sm.file_sha256(self.originals / name)), 'ours')
+        data = self.saved(name)
+        self.assertEqual(marker['scores'], sm.sheet_marks(data, self.template).digest)
+        scan = self.originals / data.get('original_storage_filename', name)
+        self.assertEqual(sm.classify_archive(self.success / (archive or name), scan, sm.file_sha256(scan)), 'ours')
 
     def open_review(self, text_mode=True):
         review = ReviewWindow(self.app, str(self.exam), self.app.student_manager, self.app.on_review_save,
@@ -104,6 +105,7 @@ class MarkedExam(unittest.TestCase):
 
 class TestReview(MarkedExam):
     def test_confirming_with_the_summary_csv_present_redraws_the_sheet(self):
+        scan_sha = sm.file_sha256(self.originals / 'IMG_0001.jpg')
         self.app.regenerate_csv_from_jsons()  # The review then saves by itself, without the app's callback
         self.assertTrue(list(self.data.glob('*.csv')))
         with patch.object(self.app, 'on_review_save', wraps=self.app.on_review_save) as callback:
@@ -116,8 +118,10 @@ class TestReview(MarkedExam):
             callback.assert_not_called()
         self.assertEqual(self.saved('IMG_0001.jpg')['total_score'], 12)
         self.assert_marked_as_saved('IMG_0001.jpg')
-        self.assertEqual(sm.file_sha256(self.originals / 'IMG_0001.jpg'),
-                         sm.file_sha256(self.success.parent / '原始文件' / 'IMG_0001.jpg'))
+        storage_name = f"701-{ROSTER[0]['name']}.jpg"
+        self.assertEqual(self.saved('IMG_0001.jpg')['original_storage_filename'], storage_name)
+        self.assertEqual(sm.file_sha256(self.originals / storage_name), scan_sha)
+        self.assertFalse((self.originals / 'IMG_0001.jpg').exists())
         # Reviewing it again redraws it again
         review.destroy()
         review = self.open_review()

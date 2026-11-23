@@ -1974,15 +1974,12 @@ class ReviewWindow(ctk.CTkToplevel):
                 self.current_data['review_logs'] = []
             self.current_data['review_logs'].append(log_entry)
             
-            # Update original_data for next save
-            self.original_data = copy.deepcopy(self.current_data)
-            
         # ------------------------------------
         
         try:
             service = getattr(self.parent_app, 'score_marks', None)
             if service:
-                service.commit_report(json_path, self.current_data)
+                service.commit_review(json_path, self.current_data, getattr(self, 'exam_folder', None))
             else:
                 write_json_atomic(json_path, self.current_data)
         except Exception as e:
@@ -1996,6 +1993,7 @@ class ReviewWindow(ctk.CTkToplevel):
             return False
 
         # 2. Regenerate Markdown file
+        self.original_data = copy.deepcopy(self.current_data)
         self.update_markdown_file(md_path)
 
         # 3. Update CSV row directly

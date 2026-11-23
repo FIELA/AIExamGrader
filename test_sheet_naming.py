@@ -15,6 +15,7 @@ from AutoGrader import App
 from config_manager import ConfigManager
 from report_files import build_report_index
 from review_window import NoStudentDialog, ReviewWindow
+from score_marks_service import ORIGINAL_RENAME_JOURNAL, ScoreMarksService
 from sheet_naming import identity_confirmed, sheet_name
 from test_sheet_identity import FakeGrader, SheetApp
 from test_student_matching import ROSTER, sheet
@@ -165,6 +166,99 @@ class TestRename(unittest.TestCase):
         self.assertEqual(app.rename_reviewed_sheets(), (0, 1))
         self.assertEqual(os.listdir(self.success), ['IMG_0001.jpg'])
 
+    def test_original_names_follow_each_confirmation_without_overwriting_a_scan(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701'), 'IMG_0002.jpg': sheet('张三', '701')})
+        scans = files(self.originals)
+        service = app.score_marks
+        for index in (1, 2):
+            path = self.reports / f'IMG_000{index}.json'
+            service.commit_review(path, dict(self.report(path.name), review_count=1))
+        self.assertEqual(files(self.originals), {'701-张三.jpg': scans['IMG_0001.jpg'],
+                                                 '701-张三_1.jpg': scans['IMG_0002.jpg']})
+
+        first, second = (self.reports / f'IMG_000{index}.json' for index in (1, 2))
+        service.commit_review(first, dict(self.report(first.name), db_student_info=ROSTER[2]))
+        service.commit_review(second, self.report(second.name))
+        self.assertEqual(self.report(second.name)['original_storage_filename'], '701-张三_1.jpg')
+        unsigned = dict(self.report(second.name), student_match={'method': 'unsigned'})
+        service.commit_review(second, unsigned)
+        self.assertEqual(files(self.originals), {'701-李四.jpg': scans['IMG_0001.jpg'],
+                                                 'IMG_0002.jpg': scans['IMG_0002.jpg']})
+
+    def test_regrade_uses_the_new_original_name_and_keeps_its_reference(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701')})
+        path = self.reports / 'IMG_0001.json'
+        app.score_marks.commit_review(path, dict(self.report(path.name), review_count=1))
+        app.grader_engine = FakeGrader({'701-张三.jpg': sheet('张三', '701')})
+        self.assertEqual(app.regrade_single_file(str(self.success / 'IMG_0001.jpg')), (True, 'Success'))
+        saved = self.report(path.name)
+        self.assertEqual(saved['original_filename'], 'IMG_0001.jpg')
+        self.assertEqual(saved['original_storage_filename'], '701-张三.jpg')
+
+    def test_interrupted_or_failed_original_rename_is_reconciled_with_the_report(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701')})
+        path = self.reports / 'IMG_0001.json'
+        data = self.report(path.name)
+        scan = (self.originals / 'IMG_0001.jpg').read_bytes()
+        service = app.score_marks
+        journal = Path(app.get_folder_path('grading_data')) / ORIGINAL_RENAME_JOURNAL
+
+        with patch.object(service, 'commit_report', side_effect=PermissionError('report locked')):
+            with self.assertRaisesRegex(PermissionError, 'report locked'):
+                service.commit_review(path, dict(data, review_count=1))
+        self.assertEqual(self.report(path.name), data)
+        self.assertEqual(files(self.originals), {'IMG_0001.jpg': scan})
+        self.assertFalse(journal.exists())
+
+        with patch.object(service, 'commit_report', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                service.commit_review(path, dict(data, review_count=1))
+        self.assertTrue(journal.exists())
+        self.assertEqual(files(self.originals), {'701-张三.jpg': scan})
+        reopened = ScoreMarksService(app)
+        reopened.recover_original_rename()
+        self.assertEqual(files(self.originals), {'IMG_0001.jpg': scan})
+
+        with patch.object(reopened, '_clear_original_rename', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                reopened.commit_review(path, dict(data, review_count=1))
+        self.assertTrue(journal.exists())
+        ScoreMarksService(app).recover_original_rename()
+        self.assertFalse(journal.exists())
+        self.assertEqual(self.report(path.name)['original_storage_filename'], '701-张三.jpg')
+        self.assertEqual(files(self.originals), {'701-张三.jpg': scan})
+
+    def test_missing_scan_does_not_let_another_report_take_its_name(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701'), 'IMG_0002.jpg': sheet('张三', '701')})
+        first, second = (self.reports / f'IMG_000{index}.json' for index in (1, 2))
+        service = app.score_marks
+        service.commit_review(first, dict(self.report(first.name), review_count=1))
+        (self.originals / '701-张三.jpg').unlink()
+        service.commit_review(second, dict(self.report(second.name), review_count=1))
+        service.commit_review(first, dict(self.report(first.name), review_count=2))
+        self.assertIsNone(service.original_path(app.exam_folder, self.report(first.name)))
+        self.assertEqual(self.report(first.name)['review_count'], 2)
+        self.assertEqual(self.report(second.name)['original_storage_filename'], '701-张三_1.jpg')
+        self.assertTrue(any('701-张三.jpg' in line and '找不到原图' in line for line in app.logs))
+        app.grader_engine = FakeGrader({})
+        ok, message = app.regrade_single_file(str(self.success / 'IMG_0001.jpg'))
+        self.assertFalse(ok)
+        self.assertIn('找不到可用于重阅的原图（701-张三.jpg）', message)
+
+    def test_rescanning_a_reused_number_cannot_replace_a_renamed_original(self):
+        app = self.grade({'IMG_0001.jpg': sheet('张三', '701')})
+        report = self.reports / 'IMG_0001.json'
+        archive = self.success / 'IMG_0001.jpg'
+        scan = archive.read_bytes()
+        app.score_marks.commit_review(report, dict(self.report(report.name), review_count=1))
+        App.remove_sheet(app, str(archive), str(report))
+        Image.new('RGB', (8, 8), 'white').save(self.exam / 'IMG_0001.jpg')
+        self.assertEqual(app._rename_new_arrivals(['IMG_0001.jpg']), ['IMG_0001_1.jpg'])
+        self.assertEqual(files(self.originals), {'701-张三.jpg': scan})
+        (self.originals / '701-张三.jpg').unlink()
+        (self.exam / '701-张三.jpg').write_bytes(scan)
+        self.assertEqual(app._rename_new_arrivals(['701-张三.jpg']), ['701-张三_1.jpg'])
+
 
 class TestBackupAfterRenaming(unittest.TestCase):
     def test_a_renamed_sheet_is_not_backed_up_again(self):
@@ -185,9 +279,18 @@ class TestBackupAfterRenaming(unittest.TestCase):
             try:
                 app.withdraw()
                 app.exam_folder, app.rubric_path, app.current_api_key = str(exam), str(root / 'rubric.txt'), 'fake-test-key'
+                app.processing = True
+                report_path = exam / '阅卷报告' / 'IMG_0001.json'
+                app.score_marks.commit_review(report_path, dict(report, review_count=1))
+                self.assertTrue((exam / '原始文件' / 'IMG_0001.jpg').is_file())
+                self.assertTrue(json.loads(report_path.read_text())['original_rename_pending'])
                 with patch('AutoGrader.AIGraderEngine'):
-                    app.process_images()  # The next grading run
-                self.assertEqual(sorted(os.listdir(exam / '原始文件')), ['IMG_0001.jpg', 'IMG_0009.jpg'])
+                    app.process_images()  # Grading finishes and processes the queued rename.
+                    saved = json.loads(report_path.read_text())
+                    self.assertEqual(saved['original_storage_filename'], '701-张三.jpg')
+                    self.assertNotIn('original_rename_pending', saved)
+                    app.process_images()  # The next run must use the new storage name for backups.
+                self.assertEqual(sorted(os.listdir(exam / '原始文件')), ['701-张三.jpg', 'IMG_0009.jpg'])
             finally:
                 app.destroy()
 
@@ -257,13 +360,15 @@ class TestFinishingReview(unittest.TestCase):
         review.confirm_all_and_next()  # Right after choosing: no 3-second wait
         saved = self.saved()
         self.assertEqual((saved['db_student_info']['name'], saved['student_match']['method'], saved['review_count']), ('李四', 'manual', 1))
+        self.assertEqual(saved.get('original_storage_filename'), '701-李四.jpg')
+        self.assertEqual((self.originals / '701-李四.jpg').read_bytes(), (self.success / 'IMG_0002.jpg').read_bytes())
         self.assertEqual(len(self.asked), 1)
         self.dialogs['showinfo'].assert_not_called()  # A first review shows its result before moving on
         review.advance_now()
 
         self.assertFalse(review.winfo_exists())
         self.assertEqual(sorted(os.listdir(self.success)), ['701-张三.jpg', '701-李四.jpg'])
-        self.assertEqual(sorted(os.listdir(self.originals)), ['IMG_0001.jpg', 'IMG_0002.jpg'])
+        self.assertEqual(sorted(os.listdir(self.originals)), ['701-李四.jpg', 'IMG_0001.jpg'])
         message = self.dialogs['showinfo'].call_args.args[1]
         self.assertIn("本次重命名 2 张", message)
         self.assertIn("原始文件", message)

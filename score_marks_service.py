@@ -25,10 +25,14 @@ import threading
 import time
 
 import score_marks as sm
-from report_files import record_image_name
+from report_files import filename_key, record_image_name, unique_filename
+from sheet_naming import IMAGE_EXTENSIONS, identity_confirmed, original_name, original_storage_name, sheet_name
+from student_manager import UNSIGNED
 
 TEMPLATE_FILE = 'score_marks.json'
 TEMP_SUFFIX = '.aieg-marks.tmp'
+ORIGINAL_RENAME_JOURNAL = '.original-rename.json'
+ORIGINAL_FIELDS = ('original_storage_filename', 'original_rename_base', 'original_rename_pending')
 RETRIES = 3
 RETRY_DELAY = 0.5  # Seconds before the first retry; doubled each time
 
@@ -120,8 +124,8 @@ class ScoreMarksService:
         return bool(image_path and os.path.isfile(image_path) and sm.read_marker(image_path))
 
     def original_path(self, exam, data):
-        """The sheet's scan: only the name its report records it was scanned with, never a guess."""
-        name = os.path.basename(str((data or {}).get('original_filename') or ''))
+        """The sheet's scan under the storage name recorded in its report."""
+        name = original_storage_name(data or {})
         if not name:
             return None
         path = os.path.join(self.folder(exam, 'original_files'), name)
@@ -141,12 +145,145 @@ class ScoreMarksService:
 
     # --- Committing reports ---
 
-    def commit_report(self, json_path, data, enqueue=True, exam=None):
+    def commit_report(self, json_path, data, enqueue=True, exam=None, update_original=False):
         """Save a report whole; when its scores may have changed, queue its image in the same step."""
         with self.commit_lock:
+            if not update_original:
+                data = self._keep_original_fields(json_path, data)
             write_json_atomic(json_path, data)
             if enqueue:
                 self.enqueue(json_path, exam)
+
+    def _keep_original_fields(self, json_path, data):
+        """A grading or review window may have read the report before the scan was renamed."""
+        try:
+            previous = self._read_report(json_path)
+        except (FileNotFoundError, ValueError):
+            return dict(data)
+        if original_name(previous) != original_name(data):
+            return dict(data)
+        record = {key: value for key, value in data.items() if key not in ORIGINAL_FIELDS}
+        record.update({key: previous[key] for key in ORIGINAL_FIELDS if key in previous})
+        return record
+
+    def commit_review(self, json_path, data, exam=None):
+        """Save a confirmed review and rename its scan, or defer the rename until grading finishes."""
+        exam = self._exam(exam)
+        with self.app.rename_lock, self.commit_lock:
+            self._recover_original_rename(exam)
+            record = self._keep_original_fields(json_path, data)
+            if getattr(self.app, 'processing', False):
+                record['original_rename_pending'] = True
+                self.commit_report(json_path, record, enqueue=False, exam=exam, update_original=True)
+            else:
+                self._commit_reviewed_original(exam, json_path, record)
+            for key in ORIGINAL_FIELDS:
+                if key in record:
+                    data[key] = record[key]
+                else:
+                    data.pop(key, None)
+            self.enqueue(json_path, exam)
+
+    def finish_original_renames(self, exam=None):
+        """Finish only renames explicitly queued by a review during grading."""
+        exam = self._exam(exam)
+        with self.app.rename_lock, self.commit_lock:
+            self._recover_original_rename(exam)
+            if getattr(self.app, 'processing', False):
+                return
+            for json_path, data in self.reports(exam):
+                if data.get('original_rename_pending'):
+                    try:
+                        self._commit_reviewed_original(exam, json_path, data)
+                    except OSError as error:
+                        self._log('log_original_rename_problem', file=original_name(data), error=error)
+                        if os.path.exists(self._original_rename_journal(exam)):
+                            raise  # Resolve an incomplete move before touching another scan
+
+    def _commit_reviewed_original(self, exam, json_path, data):
+        scan = original_name(data)
+        current = original_storage_name(data)
+        student = (data.get('db_student_info') or {})
+        unsigned = (data.get('student_match') or {}).get('method') == UNSIGNED
+        base = sheet_name(student) if not unsigned and identity_confirmed(data) else ''
+        wanted = base + os.path.splitext(current)[1] if base else scan
+        source = self.original_path(exam, data)
+        data.pop('original_rename_pending', None)
+        if not source or not wanted:
+            self.commit_report(json_path, data, enqueue=False, exam=exam, update_original=True)
+            if current and (base or data.get('original_storage_filename')):
+                self._log('log_original_rename_missing', file=current)
+            return
+
+        folder = os.path.dirname(source)
+        if data.get('original_rename_base') == wanted or filename_key(wanted) == filename_key(current):
+            target = current  # Preserve its assigned suffix on subsequent confirmations
+        else:
+            reserved = {filename_key(original_storage_name(record)) for path, record in self.original_reports(exam)
+                        if os.path.abspath(path) != os.path.abspath(json_path)}
+            target = unique_filename(wanted, [folder], source, reserved=reserved)
+        if base or target != scan:
+            data.update(original_storage_filename=target, original_rename_base=wanted)
+        else:
+            data.pop('original_storage_filename', None)
+            data.pop('original_rename_base', None)
+        if target == current:
+            self.commit_report(json_path, data, enqueue=False, exam=exam, update_original=True)
+            return
+
+        journal = self._original_rename_journal(exam)
+        os.makedirs(os.path.dirname(journal), exist_ok=True)
+        write_json_atomic(journal, {'report': os.path.basename(json_path), 'old': current, 'new': target,
+                                    'sha256': sm.file_sha256(source)})
+        try:
+            os.rename(source, os.path.join(folder, target))
+            self.commit_report(json_path, data, enqueue=False, exam=exam, update_original=True)
+        except Exception:
+            self._recover_original_rename(exam)
+            raise
+        self._clear_original_rename(journal)
+
+    def _original_rename_journal(self, exam):
+        return os.path.join(self.folder(exam, 'grading_data'), ORIGINAL_RENAME_JOURNAL)
+
+    def recover_original_rename(self, exam=None):
+        with self.app.rename_lock, self.commit_lock:
+            self._recover_original_rename(self._exam(exam))
+
+    def _recover_original_rename(self, exam):
+        """The saved report decides which name a scan has after an interrupted rename."""
+        journal = self._original_rename_journal(exam)
+        try:
+            transaction = self._read_report(journal)
+        except FileNotFoundError:
+            return
+        report, old, new, digest = (transaction[key] for key in ('report', 'old', 'new', 'sha256'))
+        if any(not isinstance(name, str) or not name or os.path.basename(name) != name or name in ('.', '..')
+               for name in (report, old, new)):
+            raise ValueError(f'Invalid paths in {journal}')
+        report_path = os.path.join(self.folder(exam, 'reports'), report)
+        try:
+            saved = original_storage_name(self._read_report(report_path))
+        except FileNotFoundError:
+            saved = old
+        if saved not in (old, new):
+            raise ValueError(f'Report and original rename disagree: {report}')
+        folder = self.folder(exam, 'original_files')
+        expected = os.path.join(folder, saved)
+        other = os.path.join(folder, old if saved == new else new)
+        expected_exists, other_exists = os.path.lexists(expected), os.path.lexists(other)
+        actual = expected if expected_exists else other
+        if expected_exists == other_exists or sm.file_sha256(actual) != digest:
+            raise OSError(f'Cannot verify the scan for {report}: {old}, {new}')
+        if not expected_exists:
+            os.rename(other, expected)
+        self._clear_original_rename(journal)
+
+    def _clear_original_rename(self, journal):
+        try:
+            os.remove(journal)
+        except OSError as error:
+            self._log('log_original_rename_problem', file=os.path.basename(journal), error=error)
 
     def enqueue(self, json_path, exam=None):
         exam = self._exam(exam)
@@ -239,7 +376,9 @@ class ScoreMarksService:
         if not template or template.get('status') not in (sm.ENABLED, sm.PENDING):
             return
         try:
-            data = self._read_report(json_path)
+            with self.app.rename_lock:
+                data = self._read_report(json_path)
+                original = self.original_path(exam, data)
         except FileNotFoundError:
             self._set(json_path, 'removed')
             return
@@ -257,9 +396,8 @@ class ScoreMarksService:
         if not archive:
             self._set(json_path, 'not_archived')  # Queued again once it is moved to the success folder
             return
-        original = self.original_path(exam, data)
         if not original:
-            self._problem(json_path, image, [('mark_problem_no_original', {'file': data.get('original_filename') or '-'})])
+            self._problem(json_path, image, [('mark_problem_no_original', {'file': original_storage_name(data) or '-'})])
             return
         try:
             size = sm.normalized_size(original)
@@ -318,6 +456,9 @@ class ScoreMarksService:
                 now = sm.sheet_marks(data, template)
                 if now.digest != digest:
                     self.enqueue(json_path, exam)  # Scores changed while drawing: draw the new ones
+                    return
+                if self.original_path(exam, data) != original:
+                    self.enqueue(json_path, exam)  # The scan moved while this task was reading it
                     return
                 path = self.archive_path(exam, data)  # Its name now, after any renaming
                 if not path:
@@ -423,6 +564,16 @@ class ScoreMarksService:
                     continue
         return found
 
+    def original_reports(self, exam=None):
+        """Scans remain reserved even when their reports move out of the active grades."""
+        yield from self.reports(exam)
+        removed = self.folder(exam, 'removed')
+        if os.path.isdir(removed):
+            with os.scandir(removed) as entries:
+                for entry in entries:
+                    if entry.is_dir():
+                        yield from self.reports(entry.path)
+
     def scan(self, exam=None, queue=True):
         """
         Compare each graded image's marker (its header only) with its report and the template, queue those out of
@@ -516,15 +667,16 @@ class ScoreMarksService:
                 skipped.append((os.path.basename(json_path), self.app.t('mark_problem_no_report')))
                 continue
             image = record_image_name(data) or os.path.basename(json_path)
-            original = self.original_path(exam, data)
-            if not original:
-                skipped.append((image, self.app.t('mark_problem_no_original', file=data.get('original_filename') or '-')))
-                continue
             try:
-                original_sha = sm.file_sha256(original)
                 with self.app.rename_lock:
                     with self.commit_lock:
-                        archive = self.archive_path(exam, self._read_report(json_path))
+                        data = self._read_report(json_path)
+                        original = self.original_path(exam, data)
+                        if not original:
+                            skipped.append((image, self.app.t('mark_problem_no_original', file=original_storage_name(data) or '-')))
+                            continue
+                        original_sha = sm.file_sha256(original)
+                        archive = self.archive_path(exam, data)
                         state = sm.classify_archive(archive, original, original_sha) if archive else None
                         if state != 'ours':
                             reason = 'mark_problem_already_clean' if state == 'clean' else \
@@ -547,18 +699,17 @@ class ScoreMarksService:
     # --- Keeping marked images away from the model and the backups ---
 
     def model_source(self, image_path, data, exam=None):
-        """
-        The image to grade a sheet from. Before any marks, the graded image itself (as always); after, only its
-        scan, as the graded image may carry scores (or have lost its marker to an editor).
-        """
+        """Use a renamed scan directly. Legacy sheets can use their archive until marks have been enabled."""
         exam = self._exam(exam)
-        if not self.marks_ever_written(exam, image_path):
+        marked = self.marks_ever_written(exam, image_path)
+        if not marked and not (data or {}).get('original_storage_filename'):
             return image_path
         original = self.original_path(exam, data)
         if original and os.path.isfile(image_path) and sm.normalized_size(original) == sm.normalized_size(image_path):
             return original
-        raise MarksSourceError(self.app.t('msg_marks_no_clean_source', image=os.path.basename(image_path),
-                                          file=(data or {}).get('original_filename') or '-'))
+        message = 'msg_marks_no_clean_source' if marked else 'msg_regrade_no_original'
+        raise MarksSourceError(self.app.t(message, image=os.path.basename(image_path),
+                                          file=original_storage_name(data or {}) or '-'))
 
     def may_back_up(self, image_path, exam=None):
         """Whether a graded image may be copied to the original files as its scan (never once marks were written)."""
@@ -577,12 +728,14 @@ class ScoreMarksService:
         originals = self.folder(exam, 'original_files')
         marker = sm.read_marker(success_path)
         if marker:
-            original = os.path.join(originals, os.path.basename(str(marker.get('orig') or '')))
-            target = os.path.join(exam, os.path.basename(original))
             try:
-                if (os.path.isfile(original) and not os.path.exists(target)
-                        and sm.file_pixel_digest(success_path) == marker['content']
-                        and sm.file_sha256(original) == marker.get('orig_sha256')):
+                if sm.file_pixel_digest(success_path) != marker['content'] or not marker.get('orig_sha256'):
+                    return None, None
+                original = self._scan_matching_marker(originals, marker)
+                if not original:
+                    return None, None
+                target = os.path.join(exam, os.path.basename(original))
+                if not os.path.lexists(target):
                     shutil.copy2(original, target)
                     if sm.files_equal(original, target):
                         os.remove(success_path)  # Only a drawing of the scan, which stays in the original files
@@ -595,3 +748,15 @@ class ScoreMarksService:
         if os.path.isfile(same) and sm.files_equal(success_path, same):
             return 'move', name
         return None, None
+
+    @staticmethod
+    def _scan_matching_marker(originals, marker):
+        digest = marker['orig_sha256']
+        path = os.path.join(originals, os.path.basename(str(marker.get('orig') or '')))
+        if os.path.isfile(path) and sm.file_sha256(path) == digest:
+            return path
+        # A scan may have been renamed since the marked archive was drawn. The embedded checksum still identifies it.
+        with os.scandir(originals) as entries:
+            matches = [entry.path for entry in entries if entry.name.lower().endswith(IMAGE_EXTENSIONS)
+                       and entry.is_file() and sm.file_sha256(entry.path) == digest]
+        return matches[0] if len(matches) == 1 else None
